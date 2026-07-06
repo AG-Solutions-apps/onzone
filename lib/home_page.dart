@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'app_theme.dart';
 import 'work_order_detail_page.dart';
 import 'add_packing_slip_page.dart';
+import 'api.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -20,13 +22,15 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> displayedOrders = [];
   bool isLoading = true;
   String errorMessage = '';
+  String selectedTab = 'Pending';
   
-  // Pagination variables
+  int totalPendingCount = 0;
+  int totalClosedCount = 0;
   int currentPage = 1;
-  int itemsPerPage = 10;
+  int itemsPerPage = 1000;
   int totalPages = 1;
 
-  final String workOrderUrl = 'https://houseofonzone.com/admin/public/api/fetch-work-order-list';
+
 
   @override
   void initState() {
@@ -61,34 +65,41 @@ class _HomePageState extends State<HomePage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token') ?? '';
+      final headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
 
-      final response = await http.get(
-        Uri.parse(workOrderUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+      // Fetch pending orders
+      final pendingResponse = await http.get(
+        Uri.parse('$baseUrl/fetch-work-order-app-list'),
+        headers: headers,
       );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
-        if (data['workorder'] != null && data['workorder'] is List) {
-          setState(() {
-            workOrders = data['workorder'];
-            totalPages = (workOrders.length / itemsPerPage).ceil();
-            _updateDisplayedOrders();
-            isLoading = false;
-            errorMessage = '';
-          });
-          print('Loaded ${workOrders.length} work orders');
-        } else {
-          setState(() {
-            errorMessage = 'No work orders found';
-            isLoading = false;
-          });
-        }
+      // Fetch closed orders
+      final closedResponse = await http.get(
+        Uri.parse('$baseUrl/fetch-work-order-close-app-list'),
+        headers: headers,
+      );
+
+      if (pendingResponse.statusCode == 200 && closedResponse.statusCode == 200) {
+        final pendingData = jsonDecode(pendingResponse.body);
+        final closedData = jsonDecode(closedResponse.body);
+
+        final List<dynamic> pendingList = pendingData['workorder'] is List ? pendingData['workorder'] : [];
+        final List<dynamic> closedList = closedData['workorder'] is List ? closedData['workorder'] : [];
+
+        setState(() {
+          totalPendingCount = pendingList.length;
+          totalClosedCount = closedList.length;
+          workOrders = selectedTab == 'Closed' ? closedList : pendingList;
+          totalPages = 1;
+          _updateDisplayedOrders();
+          isLoading = false;
+          errorMessage = '';
+        });
+        print('Loaded $totalPendingCount pending and $totalClosedCount closed orders');
       } else {
         await _fetchWorkOrdersWithoutToken();
       }
@@ -100,40 +111,46 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchWorkOrdersWithoutToken() async {
     try {
-      final response = await http.get(
-        Uri.parse(workOrderUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+      final headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+
+      final pendingResponse = await http.get(
+        Uri.parse('$baseUrl/fetch-work-order-app-list'),
+        headers: headers,
       );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['workorder'] != null && data['workorder'] is List) {
-          setState(() {
-            workOrders = data['workorder'];
-            totalPages = (workOrders.length / itemsPerPage).ceil();
-            _updateDisplayedOrders();
-            isLoading = false;
-            errorMessage = '';
-          });
-          print('Loaded ${workOrders.length} work orders without token');
-        } else {
-          setState(() {
-            errorMessage = 'No work orders found';
-            isLoading = false;
-          });
-        }
+      final closedResponse = await http.get(
+        Uri.parse('$baseUrl/fetch-work-order-close-app-list'),
+        headers: headers,
+      );
+
+      if (pendingResponse.statusCode == 200 && closedResponse.statusCode == 200) {
+        final pendingData = jsonDecode(pendingResponse.body);
+        final closedData = jsonDecode(closedResponse.body);
+
+        final List<dynamic> pendingList = pendingData['workorder'] is List ? pendingData['workorder'] : [];
+        final List<dynamic> closedList = closedData['workorder'] is List ? closedData['workorder'] : [];
+
+        setState(() {
+          totalPendingCount = pendingList.length;
+          totalClosedCount = closedList.length;
+          workOrders = selectedTab == 'Closed' ? closedList : pendingList;
+          totalPages = 1;
+          _updateDisplayedOrders();
+          isLoading = false;
+          errorMessage = '';
+        });
       } else {
         setState(() {
-          errorMessage = 'Failed to load work orders. Status: ${response.statusCode}';
+          errorMessage = 'Failed to load work orders';
           isLoading = false;
         });
       }
     } catch (e) {
       setState(() {
-        errorMessage = 'Error: $e';
+        errorMessage = 'Failed to load work orders. Check network connection.';
         isLoading = false;
       });
     }
@@ -182,7 +199,8 @@ class _HomePageState extends State<HomePage> {
 
   // Function to handle Add Packing Slip from card
   void _onAddPackingSlip(Map<String, dynamic> order) {
-    final workOrderId = _parseInt(order['id']);
+    print(jsonEncode(order));
+    final workOrderId = _parseInt(order['work_order_no']);
     final workOrderRef = order['work_order_ref']?.toString() ?? '';
     final brand = order['work_order_brand']?.toString() ?? '';
     final workOrderNo = _parseInt(order['work_order_no']);
@@ -206,8 +224,12 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    const primaryColor = AppTheme.primaryColor;
+    const gradientColors = AppTheme.gradientColors;
+    const isDark = false;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E1A),
+      backgroundColor: const Color.fromARGB(255, 255, 255, 255),
       appBar: AppBar(
         title: Row(
           children: [
@@ -215,40 +237,40 @@ class _HomePageState extends State<HomePage> {
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
+                  colors: gradientColors,
                 ),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
-                Icons.dashboard,
+                Icons.person,
                 color: Colors.white,
                 size: 20,
               ),
             ),
             const SizedBox(width: 12),
-            const Text(
-              'WORK ORDER DASHBOARD',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
-                letterSpacing: 1.2,
-                color: Colors.white,
+            Text(
+              ' ${userName.toUpperCase()}',
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                letterSpacing: 0.8,
+                color: Color(0xFF0F172A),
               ),
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF141B2D),
-        elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.3),
+        backgroundColor: Colors.white,
+        elevation: 1,
+        shadowColor: Colors.black.withOpacity(0.05),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E2740),
+              color: const Color(0xFFF1F5F9),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: const Icon(Icons.refresh, color: Color(0xFF00D4FF)),
+              icon: const Icon(Icons.refresh, color: primaryColor),
               onPressed: _fetchWorkOrders,
               tooltip: 'Refresh',
             ),
@@ -256,11 +278,11 @@ class _HomePageState extends State<HomePage> {
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E2740),
+              color: const Color(0xFFF1F5F9),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: const Icon(Icons.logout, color: Color(0xFFFF6B6B)),
+              icon: const Icon(Icons.logout, color: Color(0xFFEF4444)),
               onPressed: _logout,
               tooltip: 'Logout',
             ),
@@ -271,12 +293,12 @@ class _HomePageState extends State<HomePage> {
         children: [
           // KPI Cards Row
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             decoration: const BoxDecoration(
-              color: Color(0xFF141B2D),
+              color: Colors.white,
               border: Border(
                 bottom: BorderSide(
-                  color: Color(0xFF1E2740),
+                  color: Color(0xFFE2E8F0),
                   width: 1,
                 ),
               ),
@@ -284,176 +306,117 @@ class _HomePageState extends State<HomePage> {
             child: Row(
               children: [
                 _buildKPICard(
-                  'Total Orders',
-                  workOrders.length.toString(),
-                  Icons.assignment,
-                  const Color(0xFF00D4FF),
-                  'Total Work Orders',
+                  'Pending Orders',
+                  totalPendingCount.toString(),
+                  Icons.assignment_outlined,
+                  'Active work orders',
                 ),
                 _buildKPICard(
-                  'Active',
-                  workOrders.where((order) {
-                    final status = order['work_order_status']?.toString().toLowerCase() ?? '';
-                    return status.contains('progress') || status.contains('process');
-                  }).length.toString(),
-                  Icons.pending_actions,
-                  const Color(0xFFF59E0B),
-                  'In Progress',
-                ),
-                _buildKPICard(
-                  'Completed',
-                  workOrders.where((order) {
-                    final status = order['work_order_status']?.toString().toLowerCase() ?? '';
-                    return status.contains('complete') || status.contains('done');
-                  }).length.toString(),
-                  Icons.check_circle,
-                  const Color(0xFF10B981),
-                  'Completed Orders',
+                  'Recently Closed',
+                  totalClosedCount.toString(),
+                  Icons.history_toggle_off,
+                  'Closed work orders',
                 ),
               ],
             ),
           ),
 
-          // User Profile Summary
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF1E2740), Color(0xFF141B2D)],
+          // Tabs: Pending & Recently Closed
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
               ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: const Color(0xFF2D3748),
-                width: 1,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        if (selectedTab != 'Pending') {
+                          setState(() {
+                            selectedTab = 'Pending';
+                            currentPage = 1;
+                          });
+                          _fetchWorkOrders();
+                        }
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: selectedTab == 'Pending' ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: selectedTab == 'Pending'
+                              ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  )
+                                ]
+                              : [],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Pending',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: selectedTab == 'Pending' ? primaryColor : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        if (selectedTab != 'Closed') {
+                          setState(() {
+                            selectedTab = 'Closed';
+                            currentPage = 1;
+                          });
+                          _fetchWorkOrders();
+                        }
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: selectedTab == 'Closed' ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: selectedTab == 'Closed'
+                              ? [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  )
+                                ]
+                              : [],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Recently Closed',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: selectedTab == 'Closed' ? primaryColor : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00D4FF).withOpacity(0.3),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        userName,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          letterSpacing: 0.3,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (userEmail.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.email_outlined,
-                              size: 14,
-                              color: Colors.grey[400],
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              userEmail,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[400],
-                                letterSpacing: 0.2,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF10B981), Color(0xFF059669)],
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF10B981).withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'LIVE',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
             ),
           ),
 
           // Work Orders List with Pagination
           Expanded(
             child: isLoading
-                ? const Center(
+                ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -461,15 +424,15 @@ class _HomePageState extends State<HomePage> {
                           width: 50,
                           height: 50,
                           child: CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D4FF)),
+                            valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
                             strokeWidth: 3,
                           ),
                         ),
-                        SizedBox(height: 20),
+                        const SizedBox(height: 20),
                         Text(
                           'LOADING WORK ORDERS...',
                           style: TextStyle(
-                            color: Color(0xFF00D4FF),
+                            color: primaryColor,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 1.5,
@@ -488,20 +451,20 @@ class _HomePageState extends State<HomePage> {
                               Container(
                                 padding: const EdgeInsets.all(20),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF1E2740),
+                                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
                                   Icons.error_outline,
                                   size: 48,
-                                  color: Colors.grey[600],
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                 ),
                               ),
                               const SizedBox(height: 20),
                               Text(
                                 errorMessage,
                                 style: TextStyle(
-                                  color: Colors.grey[400],
+                                  color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                   fontSize: 15,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -511,8 +474,8 @@ class _HomePageState extends State<HomePage> {
                               ElevatedButton(
                                 onPressed: _fetchWorkOrders,
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF00D4FF),
-                                  foregroundColor: const Color(0xFF0A0E1A),
+                                  backgroundColor: primaryColor,
+                                  foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 32,
                                     vertical: 14,
@@ -543,13 +506,13 @@ class _HomePageState extends State<HomePage> {
                                 Icon(
                                   Icons.assignment_outlined,
                                   size: 64,
-                                  color: Colors.grey[700],
+                                  color: isDark ? Colors.grey[600] : Colors.grey[400],
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
                                   'NO WORK ORDERS FOUND',
                                   style: TextStyle(
-                                    color: Colors.grey[500],
+                                    color: isDark ? Colors.grey[500] : Colors.grey[500],
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
                                     letterSpacing: 1,
@@ -568,6 +531,7 @@ class _HomePageState extends State<HomePage> {
                                     final order = displayedOrders[index];
                                     return WorkOrderCard(
                                       order: order,
+                                      isClosed: selectedTab == 'Closed',
                                       onTap: () {
                                         Navigator.push<bool>(
                                           context,
@@ -596,121 +560,35 @@ class _HomePageState extends State<HomePage> {
                                 ),
                               ),
                               // Pagination Controls
-                              if (totalPages > 1)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF141B2D),
-                                    border: Border(
-                                      top: BorderSide(
-                                        color: const Color(0xFF1E2740),
-                                        width: 1,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      TextButton(
-                                        onPressed: currentPage > 1 
-                                            ? () => _goToPage(currentPage - 1)
-                                            : null,
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: currentPage > 1 
-                                              ? const Color(0xFF00D4FF) 
-                                              : Colors.grey[700],
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.chevron_left, size: 18),
-                                            const SizedBox(width: 4),
-                                            const Text(
-                                              'PREV',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                letterSpacing: 0.8,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 18,
-                                          vertical: 8,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          gradient: const LinearGradient(
-                                            colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
-                                          ),
-                                          borderRadius: BorderRadius.circular(12),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: const Color(0xFF00D4FF).withOpacity(0.2),
-                                              blurRadius: 10,
-                                            ),
-                                          ],
-                                        ),
-                                        child: Text(
-                                          '${currentPage.toString().padLeft(2, '0')} / ${totalPages.toString().padLeft(2, '0')}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                            fontSize: 13,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                      ),
-                                      TextButton(
-                                        onPressed: currentPage < totalPages
-                                            ? () => _goToPage(currentPage + 1)
-                                            : null,
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: currentPage < totalPages 
-                                              ? const Color(0xFF00D4FF) 
-                                              : Colors.grey[700],
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            const Text(
-                                              'NEXT',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                letterSpacing: 0.8,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Icon(Icons.chevron_right, size: 18),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
                             ],
                           ),
-          ),
+              ),
         ],
       ),
     );
   }
 
-  Widget _buildKPICard(String title, String value, IconData icon, Color color, String subtitle) {
+  Widget _buildKPICard(String title, String value, IconData icon, String subtitle) {
+    const gradientColors = AppTheme.gradientColors;
+
     return Expanded(
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(horizontal: 6),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E2740),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: color.withOpacity(0.2),
-            width: 1,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: gradientColors,
           ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryColor.withOpacity(0.2),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -719,38 +597,45 @@ class _HomePageState extends State<HomePage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  title,
-                  style: TextStyle(
-                    color: Colors.grey[400],
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white70,
                     fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
                   ),
                 ),
-                Icon(
-                  icon,
-                  color: color,
-                  size: 16,
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 16,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
             Text(
               value,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
               subtitle,
               style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 9,
-                fontWeight: FontWeight.w400,
+                color: Colors.white.withOpacity(0.75),
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
                 letterSpacing: 0.3,
               ),
             ),
@@ -766,388 +651,229 @@ class WorkOrderCard extends StatelessWidget {
   final Map<String, dynamic> order;
   final VoidCallback onTap;
   final VoidCallback onAddPackingSlip;
+  final bool isClosed;
 
   const WorkOrderCard({
     super.key, 
     required this.order,
     required this.onTap,
     required this.onAddPackingSlip,
+    required this.isClosed,
   });
+
+  int _parseInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final status = order['work_order_status'] ?? '';
-    final statusColor = _getStatusColor(status);
-    final statusIcon = _getStatusIcon(status);
-    
+    const primaryColor = AppTheme.primaryColor;
+    const gradientColors = AppTheme.gradientColors;
+
+    final workOrderNo = order['work_order_no']?.toString() ?? 'N/A';
     final workOrderRef = order['work_order_ref']?.toString() ?? 'N/A';
     final workOrderDate = order['work_order_date']?.toString() ?? 'N/A';
-    final factory = order['work_order_factory']?.toString() ?? 'N/A';
     final brand = order['work_order_brand']?.toString() ?? 'N/A';
-    final count = int.tryParse(order['work_order_count']?.toString() ?? '') ?? 0;
-    final totalReceive = int.tryParse(order['total_receive']?.toString() ?? '') ?? 0;
-    final workOrderNo = order['work_order_no']?.toString() ?? 'N/A';
+    final count = _parseInt(order['work_order_count']);
+    final totalReceive = _parseInt(order['total_receive']);
+
+    // Progress math
+    final double progress = count > 0 ? (totalReceive / count) : 0.0;
+    final int progressPercentage = (progress * 100).round().clamp(0, 100);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E2740), Color(0xFF141B2D)],
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFF2D3748),
-          width: 1,
-        ),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF0F172A).withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onTap,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Accent color line on the left side of the card
+              Container(
+                width: 6,
+                decoration: BoxDecoration(
+                  color: isClosed ? AppTheme.red : null,
+                  gradient: isClosed 
+                      ? null 
+                      : const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: AppTheme.gradientColors,
+                        ),
+                ),
+              ),
+              Expanded(
+                child: InkWell(
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Title row: Work order no and brand badge
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
+                            Text(
+                              'WO #$workOrderNo',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0F172A),
+                                letterSpacing: 0.2,
+                              ),
+                            ),
                             Container(
-                              padding: const EdgeInsets.all(6),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
-                                ),
+                                color: primaryColor.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                workOrderNo,
+                                brand.toUpperCase(),
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w700,
+                                  color: primaryColor,
                                   letterSpacing: 0.5,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                workOrderRef,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                  letterSpacing: 0.3,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
                           ],
                         ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: statusColor.withOpacity(0.3),
+                        const SizedBox(height: 8),
+                        // Work order reference description
+                        Text(
+                          workOrderRef,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF334155),
+                            height: 1.3,
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        const SizedBox(height: 14),
+                        // Progress segment
+                        // Row(
+                        //   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        //   children: [
+                        //     Text(
+                        //       '$totalReceive / $count Pcs Sent',
+                        //       style: const TextStyle(
+                        //         fontSize: 11,
+                        //         fontWeight: FontWeight.w700,
+                        //         color: Color(0xFF64748B),
+                        //       ),
+                        //     ),
+                        //     Text(
+                        //       '$progressPercentage%',
+                        //       style: const TextStyle(
+                        //         fontSize: 11,
+                        //         fontWeight: FontWeight.w800,
+                        //         color: primaryColor,
+                        //       ),
+                        //     ),
+                        //   ],
+                        // ),
+                        // const SizedBox(height: 6),
+                        // Custom thin progress bar
+                        // ClipRRect(
+                        //   borderRadius: BorderRadius.circular(4),
+                        //   child: Container(
+                        //     height: 6,
+                        //     width: double.infinity,
+                        //     color: const Color(0xFFF1F5F9),
+                        //     child: Align(
+                        //       alignment: Alignment.centerLeft,
+                        //       child: FractionallySizedBox(
+                        //         widthFactor: progress.clamp(0.0, 1.0),
+                        //         child: Container(
+                        //           decoration: const BoxDecoration(
+                        //             gradient: LinearGradient(
+                        //               colors: gradientColors,
+                        //             ),
+                        //           ),
+                        //         ),
+                        //       ),
+                        //     ),
+                        //   ),
+                        // ),
+                        // const SizedBox(height: 16),
+                        // Bottom row: Date & Add Slip button
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Icon(
-                              statusIcon,
-                              size: 12,
-                              color: statusColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              status.toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: statusColor,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildInfoRow(Icons.factory, factory),
-                            const SizedBox(height: 8),
-                            _buildInfoRow(Icons.branding_watermark, brand),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
-                              ),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
+                            Row(
                               children: [
                                 const Icon(
-                                  Icons.inventory_2,
-                                  size: 14,
-                                  color: Colors.white,
+                                  Icons.calendar_today_outlined,
+                                  size: 13,
+                                  color: Color(0xFF94A3B8),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '$count PCS',
+                                  workOrderDate,
                                   style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                    letterSpacing: 0.5,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF64748B),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: totalReceive > 0 
-                                  ? const Color(0xFF10B981).withOpacity(0.15) 
-                                  : Colors.grey[800],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: totalReceive > 0 
-                                    ? const Color(0xFF10B981).withOpacity(0.3) 
-                                    : Colors.grey[700]!,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.check_circle_outline,
-                                  size: 12,
-                                  color: totalReceive > 0 ? const Color(0xFF10B981) : Colors.grey[500],
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '$totalReceive RECEIVED',
+                            if (!isClosed)
+                              ElevatedButton.icon(
+                                onPressed: onAddPackingSlip,
+                                icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
+                                label: const Text(
+                                  'ADD SLIP',
                                   style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: totalReceive > 0 ? const Color(0xFF10B981) : Colors.grey[500],
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 11,
                                     letterSpacing: 0.5,
+                                    color: Colors.white,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    height: 1,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.transparent, const Color(0xFF2D3748), Colors.transparent],
-                      ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryColor,
+                                  elevation: 0,
+                                  shadowColor: Colors.transparent,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 12,
-                            color: Colors.grey[500],
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            workOrderDate,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[400],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2D3748),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          'WO #$workOrderNo',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey[400],
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // Add Packing Slip Button
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A0E1A),
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-              border: Border(
-                top: BorderSide(
-                  color: const Color(0xFF2D3748),
-                  width: 1,
                 ),
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.add_box_outlined,
-                      size: 18,
-                      color: const Color(0xFF00D4FF).withOpacity(0.7),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'ADD PACKING SLIP',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF00D4FF).withOpacity(0.7),
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: onAddPackingSlip,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text(
-                    'ADD NEW',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7B2FFC),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    minimumSize: const Size(0, 0),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    elevation: 0,
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
-  }
-
-  Widget _buildInfoRow(IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 14,
-          color: Colors.grey[500],
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[300],
-              fontWeight: FontWeight.w500,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Color _getStatusColor(String status) {
-    final lowerStatus = status.toLowerCase();
-    if (lowerStatus.contains('factory') || lowerStatus.contains('production')) {
-      return const Color(0xFF3B82F6);
-    } else if (lowerStatus.contains('complete') || lowerStatus.contains('done')) {
-      return const Color(0xFF10B981);
-    } else if (lowerStatus.contains('progress') || lowerStatus.contains('process')) {
-      return const Color(0xFFF59E0B);
-    } else if (lowerStatus.contains('pending') || lowerStatus.contains('wait')) {
-      return const Color(0xFFEF4444);
-    } else if (lowerStatus.contains('shipped') || lowerStatus.contains('deliver')) {
-      return const Color(0xFF8B5CF6);
-    } else {
-      return Colors.grey;
-    }
-  }
-
-  IconData _getStatusIcon(String status) {
-    final lowerStatus = status.toLowerCase();
-    if (lowerStatus.contains('factory') || lowerStatus.contains('production')) {
-      return Icons.factory;
-    } else if (lowerStatus.contains('complete') || lowerStatus.contains('done')) {
-      return Icons.check_circle;
-    } else if (lowerStatus.contains('progress') || lowerStatus.contains('process')) {
-      return Icons.hourglass_top;
-    } else if (lowerStatus.contains('pending') || lowerStatus.contains('wait')) {
-      return Icons.pending;
-    } else if (lowerStatus.contains('shipped') || lowerStatus.contains('deliver')) {
-      return Icons.local_shipping;
-    } else {
-      return Icons.help_outline;
-    }
   }
 }

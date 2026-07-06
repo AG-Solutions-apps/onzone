@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'app_theme.dart';
 import 'add_packing_slip_page.dart';
 import 'update_work_order_receive_page.dart';
+import 'api.dart';
+import 'package:http/http.dart' as http;
 
 class WorkOrderDetailPage extends StatefulWidget {
   final String workOrderRef;
@@ -34,6 +36,10 @@ class WorkOrderDetailPage extends StatefulWidget {
 }
 
 class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
+  Color get primaryColor => AppTheme.primaryColor;
+  bool get isDark => false;
+  List<Color> get gradientColors => AppTheme.gradientColors;
+
   late int totalReceive;
   List<dynamic> receivedOrders = [];
   bool isReceivedLoading = false;
@@ -86,9 +92,8 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token') ?? '';
 
-      final url = 'https://houseofonzone.com/admin/public/api/fetch-work-order-received-list';
       final response = await http.get(
-        Uri.parse(url),
+        Uri.parse('$baseUrl/fetch-work-order-received-list'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -144,21 +149,21 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     switch (status.toLowerCase()) {
       case 'on the way':
       case 'on_the_way':
-        bgColor = const Color(0xFF3B82F6).withOpacity(0.1);
-        textColor = const Color(0xFF3B82F6);
+        bgColor = const Color(0xFFDBEAFE);
+        textColor = const Color(0xFF1D4ED8);
         break;
       case 'draft':
-        bgColor = Colors.grey.withOpacity(0.1);
-        textColor = Colors.grey;
+        bgColor = const Color(0xFFF1F5F9);
+        textColor = const Color(0xFF475569);
         break;
       case 'completed':
       case 'success':
-        bgColor = const Color(0xFF10B981).withOpacity(0.1);
-        textColor = const Color(0xFF10B981);
+        bgColor = const Color(0xFFD1FAE5);
+        textColor = const Color(0xFF047857);
         break;
       default:
-        bgColor = const Color(0xFFF59E0B).withOpacity(0.1);
-        textColor = const Color(0xFFF59E0B);
+        bgColor = const Color(0xFFFEF3C7);
+        textColor = const Color(0xFFB45309);
     }
 
     return Container(
@@ -166,7 +171,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: textColor.withOpacity(0.2)),
+        border: Border.all(color: textColor.withOpacity(0.15)),
       ),
       child: Text(
         status.toUpperCase(),
@@ -249,10 +254,8 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token') ?? '';
 
-      final url = 'https://houseofonzone.com/admin/public/api/update-work-orders-received-factory-status/$id';
-      
       final response = await http.put(
-        Uri.parse(url),
+        Uri.parse('$baseUrl/update-work-orders-received-factory-status/$id'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -302,6 +305,10 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    const isDark = false;
+    const primaryColor = AppTheme.primaryColor;
+    const gradientColors = AppTheme.gradientColors;
+
     final status = widget.status ?? 'Pending';
     final statusColor = _getStatusColor(status);
     final statusIcon = _getStatusIcon(status);
@@ -311,21 +318,20 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     final double progress = count > 0 ? (totalReceive / count) : 0.0;
     final int progressPercentage = (progress * 100).round();
     
-    // Calculate pending - ensure it doesn't go negative
-    final int pending = (count - totalReceive) > 0 ? (count - totalReceive) : 0;
+    // Calculate pending - allowing negative numbers
+    final int pending = count - totalReceive;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E1A),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        // Set back arrow color to white
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF0F172A)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
+                gradient: LinearGradient(
+                  colors: gradientColors,
                 ),
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -336,29 +342,29 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
               ),
             ),
             const SizedBox(width: 12),
-            const Text(
+            Text(
               'WORK ORDER DETAILS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 14,
                 letterSpacing: 1,
-                color: Colors.white,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF141B2D),
-        elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.3),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 1,
+        shadowColor: Colors.black.withOpacity(0.05),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E2740),
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: const Icon(Icons.refresh, color: Color(0xFF00D4FF)),
+              icon: Icon(Icons.refresh, color: primaryColor),
               onPressed: _fetchReceivedOrders,
             ),
           ),
@@ -373,19 +379,15 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF1E2740), Color(0xFF141B2D)],
-                ),
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: const Color(0xFF2D3748),
+                  color: const Color(0xFFE2E8F0),
                   width: 1,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withOpacity(0.03),
                     blurRadius: 20,
                     offset: const Offset(0, 4),
                   ),
@@ -408,7 +410,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
-                                color: Colors.grey,
+                                color: Color(0xFF64748B),
                                 letterSpacing: 1,
                               ),
                             ),
@@ -418,7 +420,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                               style: const TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                                color: Color(0xFF0F172A),
                                 letterSpacing: 0.3,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -429,27 +431,27 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF2D3748),
+                                  color: const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: const Color(0xFF3D4A5C),
+                                    color: const Color(0xFFE2E8F0),
                                     width: 0.5,
                                   ),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
+                                    const Icon(
                                       Icons.factory,
                                       size: 12,
-                                      color: Colors.grey[400],
+                                      color: Color(0xFF64748B),
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
                                       widget.factory!,
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         fontSize: 10,
-                                        color: Colors.grey[300],
+                                        color: Color(0xFF475569),
                                         fontWeight: FontWeight.w500,
                                         letterSpacing: 0.3,
                                       ),
@@ -468,17 +470,17 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                             const SizedBox(height: 12),
                             Row(
                               children: [
-                                Icon(
+                                const Icon(
                                   Icons.calendar_today,
                                   size: 14,
-                                  color: Colors.grey[500],
+                                  color: Color(0xFF64748B),
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Created: ${widget.date ?? 'N/A'}',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey[400],
+                                    color: Color(0xFF475569),
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -495,10 +497,10 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.15),
+                              color: statusColor.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: statusColor.withOpacity(0.3),
+                                color: statusColor.withOpacity(0.25),
                               ),
                             ),
                             child: Row(
@@ -529,7 +531,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                                   size: const Size(80, 80),
                                   painter: CircularProgressPainter(
                                     progress: progress,
-                                    color: const Color(0xFF00D4FF),
+                                    color: primaryColor,
                                   ),
                                 ),
                                 Center(
@@ -538,17 +540,17 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                                     children: [
                                       Text(
                                         '$progressPercentage%',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w700,
-                                          color: Colors.white,
+                                          color: isDark ? Colors.white : const Color(0xFF0F172A),
                                         ),
                                       ),
                                       Text(
                                         'Complete',
                                         style: TextStyle(
                                           fontSize: 8,
-                                          color: Colors.grey[400],
+                                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
@@ -569,10 +571,10 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0A0E1A),
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: const Color(0xFF2D3748),
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
                         width: 0.5,
                       ),
                     ),
@@ -583,12 +585,12 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                           'Total',
                           count.toString(),
                           Icons.inventory_2,
-                          const Color(0xFF00D4FF),
+                          primaryColor,
                         ),
                         Container(
                           width: 1,
                           height: 30,
-                          color: const Color(0xFF2D3748),
+                          color: const Color(0xFFE2E8F0),
                         ),
                         _buildMiniStat(
                           'Received',
@@ -599,13 +601,13 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                         Container(
                           width: 1,
                           height: 30,
-                          color: const Color(0xFF2D3748),
+                          color: const Color(0xFFE2E8F0),
                         ),
                         _buildMiniStat(
                           'Pending',
                           pending.toString(),
                           Icons.pending,
-                          const Color(0xFFF59E0B),
+                          pending < 0 ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
                         ),
                       ],
                     ),
@@ -623,8 +625,8 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
+                    gradient: LinearGradient(
+                      colors: gradientColors,
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -649,7 +651,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.refresh, color: Color(0xFF00D4FF)),
+                  icon: Icon(Icons.refresh, color: primaryColor),
                   onPressed: _fetchReceivedOrders,
                 ),
               ],
@@ -658,11 +660,11 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
 
             // Received Orders List
             if (isReceivedLoading)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.all(40),
+                  padding: const EdgeInsets.all(40),
                   child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D4FF)),
+                    valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
                   ),
                 ),
               )
@@ -672,15 +674,15 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.error_outline,
                         size: 48,
-                        color: Colors.grey[600],
+                        color: Color(0xFF64748B),
                       ),
                       const SizedBox(height: 12),
                       Text(
                         receivedErrorMessage,
-                        style: TextStyle(color: Colors.grey[400]),
+                        style: const TextStyle(color: Color(0xFF64748B)),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -693,24 +695,24 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   padding: const EdgeInsets.all(40),
                   child: Column(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.inbox,
                         size: 48,
-                        color: Colors.grey[600],
+                        color: Color(0xFF64748B),
                       ),
                       const SizedBox(height: 12),
-                      Text(
+                      const Text(
                         'No packing slips found',
                         style: TextStyle(
-                          color: Colors.grey[400],
+                          color: Color(0xFF64748B),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      const Text(
                         'Add a new packing slip for this work order',
                         style: TextStyle(
-                          color: Colors.grey[500],
+                          color: Color(0xFF94A3B8),
                           fontSize: 12,
                         ),
                       ),
@@ -736,56 +738,56 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
             Container(
               width: double.infinity,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
+                gradient: LinearGradient(
+                  colors: gradientColors,
                 ),
                 borderRadius: BorderRadius.circular(14),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF00D4FF).withOpacity(0.3),
+                    color: primaryColor.withOpacity(0.15),
                     blurRadius: 20,
                     offset: const Offset(0, 4),
                   ),
                 ],
               ),
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  final navigator = Navigator.of(context);
-                  final result = await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => AddPackingSlipPage(
-                        workOrderId: widget.workOrderId,
-                        workOrderRef: widget.workOrderRef,
-                        brand: widget.brand,
-                        workOrderNo: widget.workOrderNo,
-                      ),
-                    ),
-                  );
-                  if (result == true) {
-                    navigator.pop(true);
-                  }
-                },
-                icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
-                label: const Text(
-                  'ADD PACKING SLIP',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                    color: Colors.white,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 56),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-              ),
+              // child: ElevatedButton.icon(
+              //   onPressed: () async {
+              //     final navigator = Navigator.of(context);
+              //     final result = await Navigator.push<bool>(
+              //       context,
+              //       MaterialPageRoute(
+              //         builder: (context) => AddPackingSlipPage(
+              //           workOrderId: widget.workOrderId,
+              //           workOrderRef: widget.workOrderRef,
+              //           brand: widget.brand,
+              //           workOrderNo: widget.workOrderNo,
+              //         ),
+              //       ),
+              //     );
+              //     if (result == true) {
+              //       navigator.pop(true);
+              //     }
+              //   },
+              //   icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
+              //   label: const Text(
+              //     'ADD PACKING SLIP',
+              //     style: TextStyle(
+              //       fontSize: 14,
+              //       fontWeight: FontWeight.w700,
+              //       letterSpacing: 1,
+              //       color: Colors.white,
+              //     ),
+              //   ),
+              //   style: ElevatedButton.styleFrom(
+              //     backgroundColor: Colors.transparent,
+              //     foregroundColor: Colors.white,
+              //     minimumSize: const Size(double.infinity, 56),
+              //     elevation: 0,
+              //     shape: RoundedRectangleBorder(
+              //       borderRadius: BorderRadius.circular(14),
+              //     ),
+              //   ),
+              // ),
             ),
           ],
         ),
@@ -797,23 +799,23 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2740),
+        color: const Color(0xFFF1F5F9),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: const Color(0xFF2D3748),
+          color: const Color(0xFFE2E8F0),
           width: 1,
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: Colors.grey[400]),
+          Icon(icon, size: 14, color: const Color(0xFF64748B)),
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 12,
-              color: Colors.grey[300],
+              color: Color(0xFF475569),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -828,7 +830,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
         Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
+            color: color.withOpacity(0.12),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(icon, size: 14, color: color),
@@ -839,9 +841,9 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
           children: [
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 9,
-                color: Colors.grey[500],
+                color: Color(0xFF64748B),
                 fontWeight: FontWeight.w500,
                 letterSpacing: 0.3,
               ),
@@ -851,7 +853,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: Color(0xFF0F172A),
               ),
             ),
           ],
@@ -863,40 +865,27 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
   Widget _buildReceivedOrderCard(Map<String, dynamic> item) {
     final rcNo = item['work_order_rc_no'] ?? item['id'] ?? 'N/A';
     final date = item['work_order_rc_date'] ?? item['date'] ?? item['created_at'] ?? 'N/A';
-    final factory = item['work_order_rc_factory'] ?? item['factory'] ?? 'N/A';
     final brand = item['work_order_rc_brand'] ?? item['brand'] ?? 'N/A';
     final status = item['work_order_rc_status'] ?? item['status'] ?? 'Draft';
     final id = item['id'] ?? 0;
     final qty = item['work_order_rc_qty'] ?? item['qty'] ?? 0;
 
     final cardStatus = status.toString().trim().toLowerCase();
-    Color statusColor = Colors.grey;
-    if (cardStatus == 'on the way' || cardStatus == 'on_the_way') {
-      statusColor = const Color(0xFF3B82F6);
-    } else if (cardStatus == 'completed' || cardStatus == 'success') {
-      statusColor = const Color(0xFF10B981);
-    } else if (cardStatus == 'draft') {
-      statusColor = Colors.grey;
-    }
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E2740), Color(0xFF141B2D)],
-        ),
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: const Color(0xFF2D3748),
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -911,8 +900,8 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF00D4FF), Color(0xFF7B2FFC)],
+                      gradient: LinearGradient(
+                        colors: gradientColors,
                       ),
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -930,14 +919,14 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2D3748),
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       'Qty: $qty',
                       style: TextStyle(
                         fontSize: 10,
-                        color: Colors.grey[400],
+                        color: isDark ? Colors.grey[300] : const Color(0xFF475569),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -953,33 +942,33 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
               Icon(
                 Icons.calendar_today,
                 size: 12,
-                color: Colors.grey[500],
+                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
               ),
               const SizedBox(width: 6),
               Text(
                 date.toString(),
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.grey[400],
+                  color: isDark ? Colors.grey[300] : const Color(0xFF475569),
                 ),
               ),
               const SizedBox(width: 16),
-              Icon(
-                Icons.branding_watermark,
-                size: 12,
-                color: Colors.grey[500],
-              ),
+              // const Icon(
+              //   Icons.branding_watermark,
+              //   size: 12,
+              //   color: Color(0xFF64748B),
+              // ),
               const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  brand.toString(),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[400],
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+              // Expanded(
+              //   child: Text(
+              //     brand.toString(),
+              //     style: const TextStyle(
+              //       fontSize: 11,
+              //       color: Color(0xFF475569),
+              //     ),
+              //     overflow: TextOverflow.ellipsis,
+              //   ),
+              // ),
             ],
           ),
           if (cardStatus == 'draft') ...[
@@ -991,7 +980,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   onPressed: () => _confirmStatusUpdate(id, rcNo),
                   icon: const Icon(Icons.local_shipping_outlined, size: 16),
                   label: const Text(
-                    'MARK ON THE WAY',
+                    'MARK AS SENT',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
@@ -999,25 +988,25 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3B82F6).withOpacity(0.15),
+                    backgroundColor: const Color(0xFF3B82F6).withOpacity(0.1),
                     foregroundColor: const Color(0xFF3B82F6),
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(
-                        color: const Color(0xFF3B82F6).withOpacity(0.3),
+                        color: const Color(0xFF3B82F6).withOpacity(0.2),
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.edit, color: Color(0xFF00D4FF)),
+                  icon: Icon(Icons.edit, color: primaryColor),
                   onPressed: () => _showEditDialog(id),
                   tooltip: 'Edit Packing Slip',
                   style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E2740),
+                    backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
                   ),
                 ),
               ],
@@ -1044,7 +1033,7 @@ class CircularProgressPainter extends CustomPainter {
 
     // Background circle
     final backgroundPaint = Paint()
-      ..color = const Color(0xFF1E2740)
+      ..color = const Color(0xFFF1F5F9)
       ..strokeWidth = strokeWidth
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
