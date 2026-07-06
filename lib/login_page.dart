@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_theme.dart';
 import 'home_page.dart';
+import 'api.dart';
+import 'package:http/http.dart' as http;
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -11,14 +13,49 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMixin {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
+  
+  late AnimationController _animationController;
+  late Animation<double> _logoFade;
+  late Animation<double> _logoScale;
 
-  final String loginUrl = 'https://houseofonzone.com/admin/public/api/login';
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    );
+    
+    _logoFade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+      ),
+    );
+    
+    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.0, 0.8, curve: Curves.easeOutBack),
+      ),
+    );
+    
+    _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _animationController.dispose();
+    super.dispose();
+  }
 
   Future<void> _login() async {
     if (_usernameController.text.isEmpty || _passwordController.text.isEmpty) {
@@ -38,18 +75,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _attemptLogin() async {
     try {
-      final requestBody = {
-        'email': _usernameController.text.trim(),
-        'password': _passwordController.text.trim(),
-      };
-
       final response = await http.post(
-        Uri.parse(loginUrl),
+        Uri.parse('$baseUrl/login'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode(requestBody),
+        body: jsonEncode({
+          'email': _usernameController.text.trim(),
+          'password': _passwordController.text.trim(),
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -67,18 +102,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _tryAlternativeLogin() async {
     try {
-      final requestBody = {
-        'username': _usernameController.text.trim(),
-        'password': _passwordController.text.trim(),
-      };
-
       final response = await http.post(
-        Uri.parse(loginUrl),
+        Uri.parse('$baseUrl/login'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode(requestBody),
+        body: jsonEncode({
+          'username': _usernameController.text.trim(),
+          'password': _passwordController.text.trim(),
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -128,13 +161,18 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    const primaryColor = AppTheme.primaryColor;
+    const gradientColors = AppTheme.gradientColors;
+    const isDark = false;
+
     return Scaffold(
+      backgroundColor: AppTheme.scaffoldBackgroundColor,
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.center,
             end: Alignment.bottomCenter,
-            colors: const [Colors.white, Color(0xFFF8F9FA)],
+            colors: [Colors.white, Color(0xFFF8F9FA)],
           ),
         ),
         child: SafeArea(
@@ -144,31 +182,19 @@ class _LoginPageState extends State<LoginPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Logo Section
-                const SizedBox(height: 100),
-                Center(
-                  child: Container(
-                    width: 150,
-                    height: 150,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Colors.deepPurple, Colors.purpleAccent],
+                const SizedBox(height: 20),
+                FadeTransition(
+                  opacity: _logoFade,
+                  child: ScaleTransition(
+                    scale: _logoScale,
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      child: Image.asset(
+                        "assets/onzone-logo.png",
+                        height: 200,
+                        width: 200,
+                        fit: BoxFit.contain,
                       ),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.deepPurple.withOpacity(0.3),
-                          spreadRadius: 5,
-                          blurRadius: 20,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.storefront,
-                      size: 50,
-                      color: Colors.white,
                     ),
                   ),
                 ),
@@ -176,12 +202,12 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 40),
                 
                 // Welcome Text
-                const Text(
+                Text(
                   'Welcome Back',
                   style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple,
+                    color: primaryColor,
                     letterSpacing: 0.5,
                   ),
                   textAlign: TextAlign.center,
@@ -189,11 +215,11 @@ class _LoginPageState extends State<LoginPage> {
                 
                 const SizedBox(height: 8),
                 
-                const Text(
+                Text(
                   'Sign in to continue to your account',
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.grey,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
                     fontWeight: FontWeight.w400,
                   ),
                   textAlign: TextAlign.center,
@@ -204,12 +230,15 @@ class _LoginPageState extends State<LoginPage> {
                 // Username/Email Field
                 TextField(
                   controller: _usernameController,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
                   decoration: InputDecoration(
                     labelText: 'Email or Username',
+                    labelStyle: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700]),
                     hintText: 'Enter your email or username',
-                    prefixIcon: const Icon(
+                    hintStyle: TextStyle(color: isDark ? Colors.grey[600] : Colors.grey[400]),
+                    prefixIcon: Icon(
                       Icons.person_outline,
-                      color: Colors.deepPurple,
+                      color: primaryColor,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -218,19 +247,19 @@ class _LoginPageState extends State<LoginPage> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(
-                        color: Colors.grey.shade300,
+                        color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
                         width: 1,
                       ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: Colors.deepPurple,
+                      borderSide: BorderSide(
+                        color: primaryColor,
                         width: 2,
                       ),
                     ),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 16,
@@ -244,17 +273,20 @@ class _LoginPageState extends State<LoginPage> {
                 TextField(
                   controller: _passwordController,
                   obscureText: _obscurePassword,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
                   decoration: InputDecoration(
                     labelText: 'Password',
+                    labelStyle: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700]),
                     hintText: 'Enter your password',
-                    prefixIcon: const Icon(
+                    hintStyle: TextStyle(color: isDark ? Colors.grey[600] : Colors.grey[400]),
+                    prefixIcon: Icon(
                       Icons.lock_outline,
-                      color: Colors.deepPurple,
+                      color: primaryColor,
                     ),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                        color: Colors.grey,
+                        color: isDark ? Colors.grey[500] : Colors.grey[600],
                         size: 20,
                       ),
                       onPressed: () {
@@ -270,30 +302,25 @@ class _LoginPageState extends State<LoginPage> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(
-                        color: Colors.grey.shade300,
+                        color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
                         width: 1,
                       ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: Colors.deepPurple,
+                      borderSide: BorderSide(
+                        color: primaryColor,
                         width: 2,
                       ),
                     ),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 16,
                     ),
                   ),
                 ),
-                
-                const SizedBox(height: 12),
-                
-                // Forgot Password
-                
                 
                 const SizedBox(height: 30),
                 
@@ -333,7 +360,7 @@ class _LoginPageState extends State<LoginPage> {
                 ElevatedButton(
                   onPressed: _isLoading ? null : _login,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
+                    backgroundColor: primaryColor,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
@@ -363,8 +390,30 @@ class _LoginPageState extends State<LoginPage> {
                 
                 const SizedBox(height: 20),
                 
-                // Sign Up Link
-                
+                // Sign Up Link (commented out in your original, but you can add it back)
+                // Row(
+                //   mainAxisAlignment: MainAxisAlignment.center,
+                //   children: [
+                //     Text(
+                //       "Don't have an account? ",
+                //       style: TextStyle(
+                //         color: isDark ? Colors.grey[400] : Colors.grey[600],
+                //       ),
+                //     ),
+                //     TextButton(
+                //       onPressed: () {
+                //         // Navigate to sign up
+                //       },
+                //       child: Text(
+                //         'Sign Up',
+                //         style: TextStyle(
+                //           color: primaryColor,
+                //           fontWeight: FontWeight.bold,
+                //         ),
+                //       ),
+                //     ),
+                //   ],
+                // ),
               ],
             ),
           ),
