@@ -186,6 +186,7 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
                   'pieces': 0,
                   'barcodes': [],
                   'isExpanded': true,
+                  'isFromDatabase': true,
                 });
               }
 
@@ -280,38 +281,128 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
     });
   }
 
-  void _removeBox(int index) {
-    setState(() {
-      final box = boxes[index];
-      for (var barcode in box['barcodes']) {
-        if (barcode['controller'] != null) {
-          (barcode['controller'] as TextEditingController).dispose();
-        }
-      }
-      boxes.removeAt(index);
-      for (int i = 0; i < boxes.length; i++) {
-        boxes[i]['id'] = i + 1;
-      }
-      _updateTotalPieces();
-    });
-  }
+  Future<void> _removeBox(int index) async {
+    final box = boxes[index];
+    final bool isFromDb = box['isFromDatabase'] == true;
 
-  void _addBarcode(int boxIndex) {
-    setState(() {
-      final controller = TextEditingController(text: '');
-      boxes[boxIndex]['barcodes'].add({
-        'id': boxes[boxIndex]['barcodes'].length + 1,
-        'code': '',
-        'pieces': 0,
-        'isValidated': false,
-        'isLoading': false,
-        'controller': controller,
-        'ids': [null],
+    if (isFromDb) {
+      final bool confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Box'),
+          content: Text('Are you sure you want to permanently delete Box ${box['id']} from the database? This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('CANCEL'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('DELETE'),
+            ),
+          ],
+        ),
+      ) ?? false;
+
+      if (!confirm) return;
+
+      setState(() {
+        isLoading = true;
       });
-      _updateTotalPieces();
-    });
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token') ?? '';
+        
+        final response = await http.delete(
+          Uri.parse('$baseUrl/delete-work-order-received-box-sub'),
+          headers: {
+            "Authorization": "Bearer $token",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+          },
+          body: jsonEncode({
+            "work_order_rc_ref": workOrderRcRef,
+            "work_order_rc_sub_box": box['id'].toString(),
+          }),
+        );
+
+        print('Delete Box Status: ${response.statusCode}');
+        print('Delete Box Response: ${response.body}');
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Box ${box['id']} deleted from database successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          setState(() {
+            for (var barcode in box['barcodes']) {
+              if (barcode['controller'] != null) {
+                (barcode['controller'] as TextEditingController).dispose();
+              }
+            }
+            boxes.removeAt(index);
+            for (int i = 0; i < boxes.length; i++) {
+              boxes[i]['id'] = i + 1;
+            }
+            _updateTotalPieces();
+            isLoading = false;
+          });
+        } else {
+          setState(() {
+            isLoading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete box from database: ${response.body}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } catch (e) {
+        setState(() {
+          isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } else {
+      setState(() {
+        for (var barcode in box['barcodes']) {
+          if (barcode['controller'] != null) {
+            (barcode['controller'] as TextEditingController).dispose();
+          }
+        }
+        boxes.removeAt(index);
+        for (int i = 0; i < boxes.length; i++) {
+          boxes[i]['id'] = i + 1;
+        }
+        _updateTotalPieces();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Box removed locally'),
+        ),
+      );
+    }
   }
 
+ void _addBarcode(int boxIndex) {
+  _addBarcodeRow(boxIndex);
+
+  _openScanner(
+    boxIndex,
+    boxes[boxIndex]['barcodes'].length - 1,
+  );
+}
   void _removeBarcode(int boxIndex, int barcodeIndex) {
     setState(() {
       final barcode = boxes[boxIndex]['barcodes'][barcodeIndex];
@@ -449,9 +540,37 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
       ),
     );
   }
+void _addBarcodeRow(int boxIndex) {
+  final controller = TextEditingController();
 
+  setState(() {
+    boxes[boxIndex]['barcodes'].add({
+      'id': boxes[boxIndex]['barcodes'].length + 1,
+      'code': '',
+      'pieces': 0,
+      'isValidated': false,
+      'isLoading': false,
+      'barcodeData': null,
+      'controller': controller,
+    });
+
+    totalBarcodeEntries++;
+    _updateTotals();
+  });
+}
+void _updateTotals() {
+    int total = 0;
+    for (var box in boxes) {
+      for (var barcode in box['barcodes']) {
+        total += int.tryParse(barcode['pieces'].toString()) ?? 0;
+      }
+    }
+    setState(() {
+      totalPieces = total;
+    });
+  }
   // Open scanner
-  Future<void> _openScanner(int boxIndex, int barcodeIndex) async {
+   Future<void> _openScanner(int boxIndex, int barcodeIndex) async {
     setState(() {
       scanningBoxIndex = boxIndex;
       scanningBarcodeIndex = barcodeIndex;
@@ -459,32 +578,47 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
     });
 
     try {
-      final barcode = await Navigator.push<String>(
+      final List<String>? barcodes = await Navigator.push<List<String>>(
         context,
         MaterialPageRoute(
           builder: (context) => BarcodeScannerPage(
-            onScanned: (code) {
-              Navigator.pop(context, code);
-            },
+            onDone: (scanned) {},
           ),
         ),
       );
 
-      if (barcode != null && barcode.isNotEmpty) {
-        setState(() {
-          boxes[boxIndex]['barcodes'][barcodeIndex]['code'] = barcode;
-          if (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] != null) {
-            (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] as TextEditingController).text = barcode;
-          }
-          // Reset validation when scanned
-          boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = false;
-          boxes[boxIndex]['barcodes'][barcodeIndex]['barcodeData'] = null;
-        });
+      if (barcodes != null && barcodes.isNotEmpty) {
+        final currentCode = boxes[boxIndex]['barcodes'][barcodeIndex]['code']?.toString() ?? '';
+        final currentValidated = boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] == true;
         
-        // Auto-validate after scanning
-        await _validateBarcode(boxIndex, barcodeIndex, barcode);
+        int startScanIdx = 0;
+        
+        if (currentCode.isEmpty && !currentValidated) {
+          final firstCode = barcodes.first;
+          setState(() {
+            boxes[boxIndex]['barcodes'][barcodeIndex]['code'] = firstCode;
+            if (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] != null) {
+              (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] as TextEditingController).text = firstCode;
+            }
+          });
+          await _validateBarcode(boxIndex, barcodeIndex, firstCode);
+          startScanIdx = 1;
+        }
+
+        for (int i = startScanIdx; i < barcodes.length; i++) {
+          final code = barcodes[i];
+         _addBarcodeRow(boxIndex);
+          int index = boxes[boxIndex]['barcodes'].length - 1;
+          
+          setState(() {
+            boxes[boxIndex]['barcodes'][index]['code'] = code;
+            if (boxes[boxIndex]['barcodes'][index]['controller'] != null) {
+              (boxes[boxIndex]['barcodes'][index]['controller'] as TextEditingController).text = code;
+            }
+          });
+          await _validateBarcode(boxIndex, index, code);
+        }
       }
-      
     } catch (e) {
       print('Scanner error: $e');
     } finally {
@@ -744,16 +878,18 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
                   children: [
                     if (currentStep == 1)
                       OutlinedButton(
-                        onPressed: () {
-                          setState(() {
-                            currentStep = 0;
-                          });
-                        },
+                        onPressed: totalPieces == 0
+                            ? null
+                            : () {
+                                setState(() {
+                                  currentStep = 0;
+                                });
+                              },
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: const Text('Back'),
+                        child: const Text('Edit'),
                       )
                     else
                       OutlinedButton(
@@ -765,20 +901,22 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
                         child: const Text('Cancel'),
                       ),
                     ElevatedButton(
-                      onPressed: () {
-                        if (currentStep == 0) {
-                          if (_formKey.currentState!.validate()) {
-                            setState(() {
-                              currentStep = 1;
-                            });
-                          }
-                        } else {
-                          _updateWorkOrderReceive();
-                        }
-                      },
+                      onPressed: (currentStep == 1 && totalPieces == 0)
+                          ? null
+                          : () {
+                              if (currentStep == 0) {
+                                if (_formKey.currentState!.validate()) {
+                                  setState(() {
+                                    currentStep = 1;
+                                  });
+                                }
+                              } else {
+                                _updateWorkOrderReceive();
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
+                        backgroundColor: (currentStep == 1 && totalPieces == 0) ? Colors.grey[300] : primaryColor,
+                        foregroundColor: (currentStep == 1 && totalPieces == 0) ? Colors.grey[500] : Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
@@ -971,7 +1109,14 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
                   },
                 ),
         ),
-        const SizedBox(height: 12),
+        if (totalPieces == 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'At least one barcode/piece is required to update.',
+              style: TextStyle(color: Colors.red[700], fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+          ),
         ElevatedButton.icon(
           onPressed: _addBox,
           icon: const Icon(Icons.add),
@@ -1067,6 +1212,10 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
   Widget _buildBarcodeEntry(int boxIndex, int barcodeIndex, Map<String, dynamic> barcode) {
     final isLoading = barcode['isLoading'] ?? false;
     final isValidated = barcode['isValidated'] ?? false;
+
+    final bool isBarcodeFromDb = barcode['ids'] != null &&
+        barcode['ids'].isNotEmpty &&
+        barcode['ids'][0] != null;
 
     int occurrenceCount = 0;
     int totalPiecesForCode = 0;
@@ -1207,8 +1356,12 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
             onPressed: isLoading ? null : () => _validateBarcode(boxIndex, barcodeIndex, barcode['code']?.toString() ?? ''),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 16, color: Colors.red),
-            onPressed: () => _removeBarcode(boxIndex, barcodeIndex),
+            icon: Icon(
+              Icons.close,
+              size: 16,
+              color: isBarcodeFromDb ? Colors.grey : Colors.red,
+            ),
+            onPressed: isBarcodeFromDb ? null : () => _removeBarcode(boxIndex, barcodeIndex),
           ),
         ],
       ),
@@ -1218,11 +1371,11 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
 
 // Barcode Scanner Page
 class BarcodeScannerPage extends StatefulWidget {
-  final Function(String) onScanned;
+  final Function(List<String>) onDone;
 
   const BarcodeScannerPage({
     super.key,
-    required this.onScanned,
+    required this.onDone,
   });
 
   @override
@@ -1231,25 +1384,28 @@ class BarcodeScannerPage extends StatefulWidget {
 
 class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-  );
-  bool _isProcessing = false;
-  bool _hasCalledScanned = false; // Prevent multiple events firing in quick succession
+  detectionSpeed: DetectionSpeed.unrestricted,
+);
+  
+  List<String> scannedBarcodes = [];
+  DateTime? _lastScanTime;
+bool _isProcessing = false;
+Map<String, int> get scannedSummary {
+  final Map<String, int> summary = {};
+
+  for (final code in scannedBarcodes) {
+    summary[code] = (summary[code] ?? 0) + 1;
+  }
+
+  return summary;
+}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: AppTheme.gradientColors,
-            ),
-          ),
-        ),
-        title: const Text('Scan Barcode', style: TextStyle(color: Colors.white)),
+        title: const Text('Continuous Scan'),
+        backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
@@ -1258,27 +1414,45 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
               _controller.switchCamera();
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.done, size: 28),
+            onPressed: () {
+              widget.onDone(scannedBarcodes);
+              Navigator.pop(context, scannedBarcodes);
+            },
+          ),
         ],
       ),
       body: Stack(
         children: [
           MobileScanner(
             controller: _controller,
-            onDetect: (capture) {
-              if (_isProcessing || _hasCalledScanned) return;
-              
-              final List<Barcode> barcodes = capture.barcodes;
-              for (final barcode in barcodes) {
-                final code = barcode.rawValue;
-                if (code != null && code.isNotEmpty) {
-                  _isProcessing = true;
-                  _hasCalledScanned = true;
-                  _controller.stop();
-                  widget.onScanned(code);
-                  break;
-                }
-              }
-            },
+           onDetect: (capture) async {
+  if (_isProcessing) return;
+
+  final now = DateTime.now();
+
+  if (_lastScanTime != null &&
+      now.difference(_lastScanTime!).inMilliseconds < 800) {
+    return;
+  }
+
+  final code = capture.barcodes.first.rawValue;
+
+  if (code == null || code.isEmpty) return;
+
+  _isProcessing = true;
+  _lastScanTime = now;
+
+  setState(() {
+    scannedBarcodes.add(code);
+  });
+
+  // Small vibration-like delay
+  await Future.delayed(const Duration(milliseconds: 800));
+
+  _isProcessing = false;
+},
           ),
           // Scanning overlay guide
           Center(
@@ -1294,14 +1468,13 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
               ),
               child: Stack(
                 children: [
-                  // Corner indicators
                   Positioned(
                     top: 0,
                     left: 0,
                     child: Container(
                       width: 30,
                       height: 30,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         border: Border(
                           top: BorderSide(color: Colors.white, width: 4),
                           left: BorderSide(color: Colors.white, width: 4),
@@ -1315,7 +1488,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                     child: Container(
                       width: 30,
                       height: 30,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         border: Border(
                           top: BorderSide(color: Colors.white, width: 4),
                           right: BorderSide(color: Colors.white, width: 4),
@@ -1329,7 +1502,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                     child: Container(
                       width: 30,
                       height: 30,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         border: Border(
                           bottom: BorderSide(color: Colors.white, width: 4),
                           left: BorderSide(color: Colors.white, width: 4),
@@ -1343,7 +1516,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                     child: Container(
                       width: 30,
                       height: 30,
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         border: Border(
                           bottom: BorderSide(color: Colors.white, width: 4),
                           right: BorderSide(color: Colors.white, width: 4),
@@ -1351,7 +1524,6 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                       ),
                     ),
                   ),
-                  // Center line
                   Center(
                     child: Container(
                       width: 200,
@@ -1363,33 +1535,66 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
               ),
             ),
           ),
-          // Bottom info
+          // Bottom list showing scanned items immediately
           Positioned(
-            bottom: 40,
+            bottom: 0,
             left: 0,
             right: 0,
-            child: Column(
-              children: [
-                const Text(
-                  'Position the barcode within the frame',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
+            child: Container(
+              height: 180,
+              color: Colors.white,
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Text(
+                    "Scanned (${scannedBarcodes.length})",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
                   ),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    _controller.stop();
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppTheme.primaryColor,
-                  ),
-                  child: const Text('Cancel'),
-                ),
-              ],
+                  const Divider(),
+                  Expanded(
+  child: Builder(
+    builder: (_) {
+      final items = scannedSummary.entries.toList();
+
+      return ListView.builder(
+        itemCount: items.length,
+        itemBuilder: (_, i) {
+          final item = items[i];
+
+          return ListTile(
+            dense: true,
+            leading: const Icon(
+              Icons.check_circle,
+              color: Colors.green,
+            ),
+            title: Text(item.key),
+            trailing: item.value > 1
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      "×${item.value}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  )
+                : null,
+          );
+        },
+      );
+    },
+  ),
+),
+                ],
+              ),
             ),
           ),
         ],

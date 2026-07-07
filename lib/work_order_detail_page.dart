@@ -82,6 +82,14 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     }
   }
 
+  int _parseInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
   Future<void> _fetchReceivedOrders() async {
     setState(() {
       isReceivedLoading = true;
@@ -124,8 +132,51 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
           return ref.trim().toLowerCase() == widget.workOrderRef.trim().toLowerCase();
         }).toList();
 
+        int calculatedTotalReceive = 0;
+        final List<Map<String, dynamic>> resolvedOrders = [];
+
+        await Future.wait(filteredList.map((item) async {
+          final id = item['id'];
+          int slipQty = 0;
+
+          // Try to get quantity from parent item first as fallback
+          slipQty = _parseInt(item['work_order_rc_pcs'] ?? 
+                              item['work_order_rc_qty'] ?? 
+                              item['qty'] ?? 
+                              item['work_order_rc_count']);
+
+          if (id != null && id != 0) {
+            try {
+              final subResponse = await http.get(
+                Uri.parse('$baseUrl/fetch-work-order-received-by-id/$id'),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Authorization': 'Bearer $token',
+                },
+              );
+              if (subResponse.statusCode == 200) {
+                final subData = jsonDecode(subResponse.body);
+                if (subData is Map) {
+                  final subList = subData['workorderrcsubNew'] ?? subData['workorderrcsub'] ?? [];
+                  slipQty = subList.length;
+                }
+              }
+            } catch (e) {
+              print('Error fetching sub-order $id details: $e');
+            }
+          }
+
+          calculatedTotalReceive += slipQty;
+          resolvedOrders.add({
+            ...Map<String, dynamic>.from(item),
+            'dynamic_qty': slipQty,
+          });
+        }));
+
         setState(() {
-          receivedOrders = filteredList;
+          receivedOrders = resolvedOrders;
+          totalReceive = calculatedTotalReceive;
           isReceivedLoading = false;
         });
       } else {
@@ -868,7 +919,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     final brand = item['work_order_rc_brand'] ?? item['brand'] ?? 'N/A';
     final status = item['work_order_rc_status'] ?? item['status'] ?? 'Draft';
     final id = item['id'] ?? 0;
-    final qty = item['work_order_rc_qty'] ?? item['qty'] ?? 0;
+    final qty = item['dynamic_qty'] ?? item['work_order_rc_pcs'] ?? item['work_order_rc_qty'] ?? item['qty'] ?? 0;
 
     final cardStatus = status.toString().trim().toLowerCase();
 

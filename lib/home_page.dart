@@ -23,6 +23,7 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   String errorMessage = '';
   String selectedTab = 'Pending';
+  List<dynamic> receivedOrdersList = [];
   
   int totalPendingCount = 0;
   int totalClosedCount = 0;
@@ -83,6 +84,29 @@ class _HomePageState extends State<HomePage> {
         headers: headers,
       );
 
+      List<dynamic> rawReceivedList = [];
+      try {
+        final receivedResponse = await http.get(
+          Uri.parse('$baseUrl/fetch-work-order-received-list'),
+          headers: headers,
+        );
+        if (receivedResponse.statusCode == 200) {
+          final receivedData = jsonDecode(receivedResponse.body);
+          if (receivedData is List) {
+            rawReceivedList = receivedData;
+          } else if (receivedData is Map) {
+            rawReceivedList = receivedData['workorderrc'] ?? 
+                              receivedData['work_order_received'] ?? 
+                              receivedData['received'] ?? 
+                              receivedData['workorder'] ??
+                              receivedData['data'] ?? 
+                              receivedData['list'] ?? [];
+          }
+        }
+      } catch (e) {
+        print('Error fetching received list: $e');
+      }
+
       if (pendingResponse.statusCode == 200 && closedResponse.statusCode == 200) {
         final pendingData = jsonDecode(pendingResponse.body);
         final closedData = jsonDecode(closedResponse.body);
@@ -94,6 +118,7 @@ class _HomePageState extends State<HomePage> {
           totalPendingCount = pendingList.length;
           totalClosedCount = closedList.length;
           workOrders = selectedTab == 'Closed' ? closedList : pendingList;
+          receivedOrdersList = rawReceivedList;
           totalPages = 1;
           _updateDisplayedOrders();
           isLoading = false;
@@ -126,6 +151,29 @@ class _HomePageState extends State<HomePage> {
         headers: headers,
       );
 
+      List<dynamic> rawReceivedList = [];
+      try {
+        final receivedResponse = await http.get(
+          Uri.parse('$baseUrl/fetch-work-order-received-list'),
+          headers: headers,
+        );
+        if (receivedResponse.statusCode == 200) {
+          final receivedData = jsonDecode(receivedResponse.body);
+          if (receivedData is List) {
+            rawReceivedList = receivedData;
+          } else if (receivedData is Map) {
+            rawReceivedList = receivedData['workorderrc'] ?? 
+                              receivedData['work_order_received'] ?? 
+                              receivedData['received'] ?? 
+                              receivedData['workorder'] ??
+                              receivedData['data'] ?? 
+                              receivedData['list'] ?? [];
+          }
+        }
+      } catch (e) {
+        print('Error fetching received list: $e');
+      }
+
       if (pendingResponse.statusCode == 200 && closedResponse.statusCode == 200) {
         final pendingData = jsonDecode(pendingResponse.body);
         final closedData = jsonDecode(closedResponse.body);
@@ -137,6 +185,7 @@ class _HomePageState extends State<HomePage> {
           totalPendingCount = pendingList.length;
           totalClosedCount = closedList.length;
           workOrders = selectedTab == 'Closed' ? closedList : pendingList;
+          receivedOrdersList = rawReceivedList;
           totalPages = 1;
           _updateDisplayedOrders();
           isLoading = false;
@@ -529,9 +578,17 @@ class _HomePageState extends State<HomePage> {
                                   itemCount: displayedOrders.length,
                                   itemBuilder: (context, index) {
                                     final order = displayedOrders[index];
+                                    final totalReceive = _parseInt(order['total_receive']);
+                                    final ref = order['work_order_ref']?.toString() ?? '';
+                                    final hasWorkingDetails = totalReceive > 0 || receivedOrdersList.any((item) {
+                                      final itemRef = item['work_order_rc_w_ref']?.toString() ?? '';
+                                      return itemRef.trim().toLowerCase() == ref.trim().toLowerCase();
+                                    });
+
                                     return WorkOrderCard(
                                       order: order,
                                       isClosed: selectedTab == 'Closed',
+                                      hasWorkingDetails: hasWorkingDetails,
                                       onTap: () {
                                         Navigator.push<bool>(
                                           context,
@@ -652,6 +709,7 @@ class WorkOrderCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onAddPackingSlip;
   final bool isClosed;
+  final bool hasWorkingDetails;
 
   const WorkOrderCard({
     super.key, 
@@ -659,6 +717,7 @@ class WorkOrderCard extends StatelessWidget {
     required this.onTap,
     required this.onAddPackingSlip,
     required this.isClosed,
+    required this.hasWorkingDetails,
   });
 
   int _parseInt(dynamic value) {
@@ -840,28 +899,56 @@ class WorkOrderCard extends StatelessWidget {
                               ],
                             ),
                             if (!isClosed)
-                              ElevatedButton.icon(
-                                onPressed: onAddPackingSlip,
-                                icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
-                                label: const Text(
-                                  'ADD SLIP',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 11,
-                                    letterSpacing: 0.5,
-                                    color: Colors.white,
+                              Row(
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: onTap,
+                                    icon: const Icon(Icons.visibility, size: 14, color: Colors.white),
+                                    label: const Text(
+                                      'VIEW',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                        letterSpacing: 0.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: hasWorkingDetails ? Colors.green : Colors.grey,
+                                      elevation: 0,
+                                      shadowColor: Colors.transparent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
                                   ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: primaryColor,
-                                  elevation: 0,
-                                  shadowColor: Colors.transparent,
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: onAddPackingSlip,
+                                    icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
+                                    label: const Text(
+                                      'ADD SLIP',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                        letterSpacing: 0.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: primaryColor,
+                                      elevation: 0,
+                                      shadowColor: Colors.transparent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
                                   ),
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
+                                ],
                               ),
                           ],
                         ),
