@@ -81,6 +81,9 @@ class _AddPackingSlipPageState extends State<AddPackingSlipPage> {
         if (barcode['controller'] != null) {
           (barcode['controller'] as TextEditingController).dispose();
         }
+        if (barcode['focusNode'] != null) {
+          (barcode['focusNode'] as FocusNode).dispose();
+        }
       }
     }
     super.dispose();
@@ -189,36 +192,14 @@ class _AddPackingSlipPageState extends State<AddPackingSlipPage> {
         'barcodes': [],
         'isExpanded': true,
         'boxNumber': boxes.length + 1,
+        'isBoxValidated': false,
+        'isValidatingBox': false,
       });
       totalBoxes = boxes.length;
-      _updateTotals();
+      _ensureEmptyBarcodeRow(boxes.length - 1);
     });
   }
-void _removeMergedBarcode(int boxIndex, String barcodeCode) {
-  final barcodes = boxes[boxIndex]['barcodes'];
 
-  // Find the last occurrence of this barcode
-  for (int i = barcodes.length - 1; i >= 0; i--) {
-    if (barcodes[i]['code'] == barcodeCode) {
-      if (barcodes[i]['controller'] != null) {
-        (barcodes[i]['controller'] as TextEditingController).dispose();
-      }
-
-      barcodes.removeAt(i);
-      totalBarcodeEntries--;
-
-      // Re-number ids
-      for (int j = 0; j < barcodes.length; j++) {
-        barcodes[j]['id'] = j + 1;
-      }
-
-      _updateBoxPieces(boxIndex);
-
-      setState(() {});
-      return;
-    }
-  }
-}
   void _removeBox(int index) {
     setState(() {
       final box = boxes[index];
@@ -226,6 +207,9 @@ void _removeMergedBarcode(int boxIndex, String barcodeCode) {
       for (var barcode in box['barcodes']) {
         if (barcode['controller'] != null) {
           (barcode['controller'] as TextEditingController).dispose();
+        }
+        if (barcode['focusNode'] != null) {
+          (barcode['focusNode'] as FocusNode).dispose();
         }
         totalBarcodeEntries--;
       }
@@ -238,6 +222,50 @@ void _removeMergedBarcode(int boxIndex, String barcodeCode) {
       _updateTotals();
     });
   }
+  void _ensureEmptyBarcodeRow(int boxIndex) {
+    final list = boxes[boxIndex]['barcodes'];
+    bool hasEmpty = false;
+    for (var barcode in list) {
+      if ((barcode['code']?.toString().trim() ?? '').isEmpty && barcode['isValidated'] != true) {
+        hasEmpty = true;
+        if (barcode['focusNode'] != null) {
+          final focusNode = barcode['focusNode'] as FocusNode;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (focusNode.canRequestFocus) {
+              focusNode.requestFocus();
+            }
+          });
+        }
+        break;
+      }
+    }
+
+    if (!hasEmpty) {
+      final controller = TextEditingController();
+      final focusNode = FocusNode();
+      setState(() {
+        list.insert(0, {
+          'id': list.isEmpty ? 1 : list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1,
+          'code': '',
+          'pieces': 0,
+          'isValidated': false,
+          'isLoading': false,
+          'barcodeData': null,
+          'controller': controller,
+          'focusNode': focusNode,
+        });
+        totalBarcodeEntries++;
+        _updateTotals();
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (focusNode.canRequestFocus) {
+          focusNode.requestFocus();
+        }
+      });
+    }
+  }
+
 void _addBarcodeRow(int boxIndex) {
   final controller = TextEditingController();
 
@@ -257,12 +285,7 @@ void _addBarcodeRow(int boxIndex) {
   });
 }
 void _addBarcode(int boxIndex) {
-  _addBarcodeRow(boxIndex);
-
-  _openScanner(
-    boxIndex,
-    boxes[boxIndex]['barcodes'].length - 1,
-  );
+  _ensureEmptyBarcodeRow(boxIndex);
 }
   void _removeBarcode(int boxIndex, int barcodeIndex) {
     setState(() {
@@ -270,38 +293,36 @@ void _addBarcode(int boxIndex) {
       if (barcode['controller'] != null) {
         (barcode['controller'] as TextEditingController).dispose();
       }
+      if (barcode['focusNode'] != null) {
+        (barcode['focusNode'] as FocusNode).dispose();
+      }
       boxes[boxIndex]['barcodes'].removeAt(barcodeIndex);
-      totalBarcodeEntries--;
-
       for (int i = 0; i < boxes[boxIndex]['barcodes'].length; i++) {
         boxes[boxIndex]['barcodes'][i]['id'] = i + 1;
       }
       _updateBoxPieces(boxIndex);
+      _ensureEmptyBarcodeRow(boxIndex);
     });
   }
 
   void _updateTotals() {
     int total = 0;
+    int totalEntries = 0;
     for (var box in boxes) {
       for (var barcode in box['barcodes']) {
-        total += int.tryParse(barcode['pieces'].toString()) ?? 0;
+        final pieces = int.tryParse(barcode['pieces'].toString()) ?? 0;
+        total += pieces;
+        totalEntries += pieces;
       }
     }
     setState(() {
       totalPieces = total;
+      totalBarcodeEntries = totalEntries;
     });
   }
 
   void _updateTotalPieces() {
-    int total = 0;
-    for (var box in boxes) {
-      for (var barcode in box['barcodes']) {
-        total += int.tryParse(barcode['pieces'].toString()) ?? 0;
-      }
-    }
-    setState(() {
-      totalPieces = total;
-    });
+    _updateTotals();
   }
 
   void _updateBoxPieces(int boxIndex) {
@@ -315,115 +336,132 @@ void _addBarcode(int boxIndex) {
     });
   }
 
-  // Validate barcode against API
-  Future<void> _validateBarcode(
-    int boxIndex,
-    int barcodeIndex,
-    String barcode,
-  ) async {
-    final trimmedBarcode = barcode.trim();
-    if (trimmedBarcode.isEmpty) {
+  // Per-box API validation
+  Future<void> _validateBox(int boxIndex) async {
+    final barcodes = boxes[boxIndex]['barcodes'] as List<dynamic>;
+    final nonEmptyBarcodes = barcodes
+        .asMap()
+        .entries
+        .where((e) => (e.value['code']?.toString().trim() ?? '').isNotEmpty)
+        .toList();
+
+    if (nonEmptyBarcodes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Enter barcode"),
+          content: Text('Add at least one barcode before validating'),
+          backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
     setState(() {
-      boxes[boxIndex]['barcodes'][barcodeIndex]['isLoading'] = true;
+      boxes[boxIndex]['isValidatingBox'] = true;
+      boxes[boxIndex]['isBoxValidated'] = false;
+      // Reset error state for all barcodes
+      for (var b in boxes[boxIndex]['barcodes']) {
+        b['isError'] = false;
+      }
     });
-    print("VALIDATING = $trimmedBarcode");
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token') ?? '';
 
-      // API Check: /fetch-work-order-finish-check/{work_order_no}/{barcode}
-      final url = '$barcodeCheckApi/${widget.workOrderNo}/$trimmedBarcode';
-      print('Validating barcode at URL: $url');
+      // Get unique non-empty codes to validate
+      final uniqueCodes = nonEmptyBarcodes
+          .map((e) => e.value['code']?.toString().trim() ?? '')
+          .where((code) => code.isNotEmpty)
+          .toSet()
+          .toList();
 
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final Map<String, bool> results = {};
 
-      print('Barcode Check Response Status: ${response.statusCode}');
-      print('Barcode Check Response Body: ${response.body}');
+      for (final code in uniqueCodes) {
+        try {
+          final url = '$barcodeCheckApi/${widget.workOrderNo}/$code';
+          final response = await http.get(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final bool isFound = data['code'] == 200;
-
-        if (!isFound) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(data['msg'] ?? "Barcode not in Work Order"),
-                backgroundColor: Colors.red,
-              ),
-            );
+          bool found = false;
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            found = data['code'] == 200;
           }
-          setState(() {
-            boxes[boxIndex]['barcodes'][barcodeIndex]['isLoading'] = false;
-            boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = false;
-          });
-          return;
+          results[code] = found;
+        } catch (_) {
+          results[code] = false;
         }
-      } else {
-        if (mounted) {
+      }
+
+      bool allOk = true;
+      if (mounted) {
+        setState(() {
+          for (int i = 0; i < barcodes.length; i++) {
+            final code = barcodes[i]['code']?.toString().trim() ?? '';
+            if (code.isEmpty) continue;
+
+            final isValid = results[code] ?? false;
+            if (!isValid) {
+              allOk = false;
+            }
+            boxes[boxIndex]['barcodes'][i]['isError'] = !isValid;
+          }
+          boxes[boxIndex]['isBoxValidated'] = allOk;
+          boxes[boxIndex]['isValidatingBox'] = false;
+        });
+      }
+      if (mounted) {
+        if (allOk) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("Validation failed (Status: ${response.statusCode})"),
+              content: Text('Box ${boxes[boxIndex]['id']} validated ✓'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Some barcodes are invalid — remove red ones and retry'),
               backgroundColor: Colors.red,
             ),
           );
         }
-        setState(() {
-          boxes[boxIndex]['barcodes'][barcodeIndex]['isLoading'] = false;
-          boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = false;
-        });
-        return;
       }
-    } catch (e) {
-      print('Error validating barcode: $e');
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error validating barcode: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() {
+          boxes[boxIndex]['isValidatingBox'] = false;
+        });
       }
-      setState(() {
-        boxes[boxIndex]['barcodes'][barcodeIndex]['isLoading'] = false;
-        boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = false;
-      });
-      return;
     }
+  }
+
+  // No API validation — accept barcode immediately
+  void _validateBarcode(
+    int boxIndex,
+    int barcodeIndex,
+    String barcode,
+  ) {
+    final trimmedBarcode = barcode.trim();
+    if (trimmedBarcode.isEmpty) return;
 
     setState(() {
       boxes[boxIndex]['barcodes'][barcodeIndex]['code'] = trimmedBarcode;
       boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = true;
       boxes[boxIndex]['barcodes'][barcodeIndex]['isLoading'] = false;
       boxes[boxIndex]['barcodes'][barcodeIndex]['pieces'] = 1;
-
       _updateBoxPieces(boxIndex);
+      _ensureEmptyBarcodeRow(boxIndex);
     });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Barcode Added"),
-        backgroundColor: Colors.green,
-      ),
-    );
   }
 
-  // Open scanner
   Future<void> _openScanner(int boxIndex, int barcodeIndex) async {
     setState(() {
       scanningBoxIndex = boxIndex;
@@ -444,37 +482,42 @@ void _addBarcode(int boxIndex) {
       if (barcodes != null && barcodes.isNotEmpty) {
         final currentCode = boxes[boxIndex]['barcodes'][barcodeIndex]['code']?.toString() ?? '';
         final currentValidated = boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] == true;
-        
+
         int startScanIdx = 0;
-        
+
         if (currentCode.isEmpty && !currentValidated) {
-          final firstCode = barcodes.first;
+          final firstCode = barcodes.first.trim();
           setState(() {
             boxes[boxIndex]['barcodes'][barcodeIndex]['code'] = firstCode;
+            boxes[boxIndex]['barcodes'][barcodeIndex]['isValidated'] = true;
+            boxes[boxIndex]['barcodes'][barcodeIndex]['pieces'] = 1;
             if (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] != null) {
               (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] as TextEditingController).text = firstCode;
             }
+            _updateBoxPieces(boxIndex);
+            _ensureEmptyBarcodeRow(boxIndex);
           });
-          await _validateBarcode(boxIndex, barcodeIndex, firstCode);
           startScanIdx = 1;
         }
 
         for (int i = startScanIdx; i < barcodes.length; i++) {
-          final code = barcodes[i];
-         _addBarcodeRow(boxIndex);
-          int index = boxes[boxIndex]['barcodes'].length - 1;
-          
+          final code = barcodes[i].trim();
+          _addBarcodeRow(boxIndex);
+          final int index = boxes[boxIndex]['barcodes'].length - 1;
           setState(() {
             boxes[boxIndex]['barcodes'][index]['code'] = code;
+            boxes[boxIndex]['barcodes'][index]['isValidated'] = true;
+            boxes[boxIndex]['barcodes'][index]['pieces'] = 1;
             if (boxes[boxIndex]['barcodes'][index]['controller'] != null) {
               (boxes[boxIndex]['barcodes'][index]['controller'] as TextEditingController).text = code;
             }
+            _updateBoxPieces(boxIndex);
+            _ensureEmptyBarcodeRow(boxIndex);
           });
-          await _validateBarcode(boxIndex, index, code);
         }
       }
     } catch (e) {
-      print('Scanner error: $e');
+      // ignore scanner errors
     } finally {
       setState(() {
         isScannerOpen = false;
@@ -497,42 +540,35 @@ void _addBarcode(int boxIndex) {
   }
 
   Future<void> _savePackingSlip() async {
-    // Check if there are any barcodes
-    bool hasBarcodes = false;
-    for (var box in boxes) {
-      if (box['barcodes'].isNotEmpty) {
-        hasBarcodes = true;
-        break;
-      }
-    }
-
-    if (!hasBarcodes) {
+    // Check all boxes are validated
+    final bool allBoxesValidated = boxes.isNotEmpty && boxes.every((b) => b['isBoxValidated'] == true);
+    if (!allBoxesValidated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please add at least one barcode'),
+          content: Text('Please validate all boxes before saving'),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
-    // Validate all barcodes are successfully validated against the API and not empty
-    bool allValidated = true;
+    // Check if there are any barcodes entered
+    bool hasBarcodes = false;
     for (var box in boxes) {
       for (var barcode in box['barcodes']) {
         final code = barcode['code'].toString().trim();
-        if (code.isEmpty || !barcode['isValidated']) {
-          allValidated = false;
+        if (code.isNotEmpty) {
+          hasBarcodes = true;
           break;
         }
       }
-      if (!allValidated) break;
+      if (hasBarcodes) break;
     }
 
-    if (!allValidated) {
+    if (!hasBarcodes) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please validate all barcodes (using the Check icon) before saving'),
+          content: Text('Please add at least one barcode'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -592,7 +628,7 @@ void _addBarcode(int boxIndex) {
           final code = barcode['code'].toString().trim();
           final pieces = int.tryParse(barcode['pieces'].toString()) ?? 0;
 
-          if (code.isNotEmpty && barcode['isValidated'] && pieces > 0) {
+          if (code.isNotEmpty && pieces > 0) {
             for (int i = 0; i < pieces; i++) {
               request.fields['workorder_sub_rc_data[$subIndex][work_order_rc_sub_box]'] = box['id'].toString();
               request.fields['workorder_sub_rc_data[$subIndex][work_order_rc_sub_barcode]'] = code;
@@ -677,10 +713,6 @@ void _addBarcode(int boxIndex) {
             ),
           ),
         ),
-        title: Text(
-          currentStep == 0 ? 'Add New Packing Slip – Details' : 'Add New Packing Slip – Barcodes',
-          style: const TextStyle(fontSize: 18, color: Colors.white),
-        ),
         foregroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
@@ -695,30 +727,40 @@ void _addBarcode(int boxIndex) {
             }
           },
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              currentStep == 0 ? 'Add Packing Slip' : 'Scan Barcodes',
+              style: const TextStyle(fontSize: 17, color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
+                _buildStepIndicator(0, 'Details'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
                   child: Row(
-                    children: [
-                      _buildStepIndicator(0, 'Details'),
-                      Expanded(
-                        child: Container(
-                          height: 2,
-                          color: currentStep >= 1 ? Colors.white : Colors.white.withOpacity(0.3),
-                        ),
+                    children: List.generate(4, (i) => Container(
+                      width: 6,
+                      height: 2,
+                      margin: const EdgeInsets.symmetric(horizontal: 1),
+                      decoration: BoxDecoration(
+                        color: currentStep >= 1
+                            ? Colors.white
+                            : Colors.white.withOpacity(0.35),
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      _buildStepIndicator(1, 'Barcodes'),
-                    ],
+                    )),
                   ),
                 ),
+                _buildStepIndicator(1, 'Barcodes'),
               ],
             ),
-          ),
+          ],
         ),
+        toolbarHeight: 72,
       ),
       body: isLoading || isSaving
           ? const Center(
@@ -817,43 +859,47 @@ void _addBarcode(int boxIndex) {
   Widget _buildStepIndicator(int step, String label) {
     final isActive = currentStep >= step;
     final isCompleted = currentStep > step;
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isActive ? Colors.white : Colors.white.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isActive
+            ? [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 2))]
+            : [],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             decoration: BoxDecoration(
-              color: isActive ? AppTheme.primaryColor : Colors.white.withOpacity(0.3),
+              color: isActive ? AppTheme.primaryColor : Colors.white.withOpacity(0.35),
               shape: BoxShape.circle,
             ),
             child: Center(
               child: isCompleted
-                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  ? const Icon(Icons.check_rounded, size: 13, color: Colors.white)
                   : Text(
                       '${step + 1}',
                       style: TextStyle(
-                        color: isActive ? Colors.white : Colors.white.withOpacity(0.7),
-                        fontSize: 10,
+                        color: isActive ? Colors.white : Colors.white.withOpacity(0.8),
+                        fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           Text(
             label,
             style: TextStyle(
-              color: isActive ? Colors.white : Colors.white.withOpacity(0.7),
+              color: isActive ? AppTheme.primaryColor : Colors.white.withOpacity(0.7),
               fontSize: 12,
-              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+              fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
             ),
           ),
         ],
@@ -1188,7 +1234,20 @@ void _addBarcode(int boxIndex) {
         Padding(
           padding: const EdgeInsets.all(16),
           child: ElevatedButton.icon(
-            onPressed: _addBox,
+            onPressed: () {
+              // Allow adding a new box only if at least one existing box is validated
+              final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
+              if (boxes.isNotEmpty && !anyValidated) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please validate the current box before adding a new one'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              _addBox();
+            },
             icon: const Icon(Icons.add),
             label: const Text('Add Box'),
             style: ElevatedButton.styleFrom(
@@ -1206,288 +1265,236 @@ void _addBarcode(int boxIndex) {
   }
 
   Widget _buildBoxCard(int boxIndex, Map<String, dynamic> box) {
-    final Map<String, Map<String, dynamic>> mergedBarcodes = {};
+    final barcodes = box['barcodes'] as List<dynamic>;
+    final bool isBoxValidated = box['isBoxValidated'] == true;
+    final bool isValidatingBox = box['isValidatingBox'] == true;
 
-for (final barcode in box['barcodes']) {
-  final code = barcode['code']?.toString() ?? '';
+    final List<Map<String, dynamic>> validatedBarcodes = [];
+    final List<Map<String, dynamic>> activeBarcodes = [];
+    final Set<String> seenCodes = {};
 
-  if (code.isEmpty) continue;
+    for (int i = 0; i < barcodes.length; i++) {
+      final barcode = barcodes[i];
+      final code = barcode['code']?.toString().trim() ?? '';
+      final isValidated = barcode['isValidated'] == true;
 
-  if (mergedBarcodes.containsKey(code)) {
-    mergedBarcodes[code]!['count']++;
-  } else {
-    mergedBarcodes[code] = {
-      'barcode': barcode,
-      'count': 1,
-    };
-  }
-}
+      if (code.isEmpty || !isValidated) {
+        activeBarcodes.add({...barcode, 'originalIndex': i});
+      } else if (!seenCodes.contains(code)) {
+        seenCodes.add(code);
+        validatedBarcodes.add({...barcode, 'originalIndex': i});
+      }
+    }
+
     return Card(
       key: ValueKey("box_${box['id']}"),
       margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: isBoxValidated ? Colors.green.shade600 : AppTheme.primaryColor,
+            ),
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 30,
-                      height: 30,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        shape: BoxShape.circle,
+                    if (isBoxValidated)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 6),
+                        child: Icon(Icons.check_circle, color: Colors.white, size: 18),
                       ),
-                      child: Center(
-                        child: Text(
-                          '${box['id']}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
                     Text(
-                      'Box ${box['id']} - ${box['pieces']} pieces',
+                      'Box ${box['id']} (${box['pieces']} pieces)',
                       style: const TextStyle(
-                        fontSize: 14,
+                        color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        color: AppTheme.primaryColor,
+                        fontSize: 15,
                       ),
                     ),
                   ],
                 ),
-                if (boxes.length > 1)
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red),
-                    onPressed: () => _removeBox(boxIndex),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            
-            // Barcodes (Render all rows directly, preserving individual list inputs)
-            if (box['barcodes'].isEmpty)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                child: const Center(
-                  child: Text(
-                    'No barcodes added yet',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              )
-              
-            else
-            
-             ...mergedBarcodes.values.map((item) {
-  return _buildMergedBarcodeEntry(
-    boxIndex,
-    item['barcode'],
-    item['count'],
-  );
-}).toList(),
-            
-            // Add Barcode Button
-            TextButton(
-              onPressed: () => _addBarcode(boxIndex),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primaryColor,
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add, size: 16),
-                  SizedBox(width: 4),
-                  Text('Add Barcode'),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-Widget _buildMergedBarcodeEntry(
-   int boxIndex,
-  Map<String, dynamic> barcode,
-  int count,
-) {
-  final isValidated = barcode['isValidated'] ?? false;
-
-  return Container(
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: isValidated ? Colors.green.shade50 : Colors.grey.shade50,
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(
-        color: isValidated
-            ? Colors.green.shade300
-            : Colors.grey.shade300,
-      ),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-
-        // Duplicate message
-        if (count > 1)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 6,
-            ),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade100,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.content_copy,
-                  size: 16,
-                  color: Colors.orange,
-                ),
-                SizedBox(width: 6),
-                Text(
-                  "Duplicate barcodes in this box",
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
+                Row(
+                  children: [
+                    // Validate button
+                    if (!isBoxValidated)
+                      isValidatingBox
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : TextButton(
+                              onPressed: () => _validateBox(boxIndex),
+                              style: TextButton.styleFrom(
+                                backgroundColor: Colors.white.withOpacity(0.2),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: Size.zero,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                              child: const Text(
+                                'Validate',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            )
+                    else
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            boxes[boxIndex]['isBoxValidated'] = false;
+                            for (var b in boxes[boxIndex]['barcodes']) {
+                              b['isError'] = false;
+                            }
+                          });
+                        },
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.2),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          minimumSize: Size.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        child: const Text(
+                          'Re-validate',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    if (boxes.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+                        splashRadius: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        onPressed: () => _removeBox(boxIndex),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
 
-        Row(
-          children: [
-
-            Icon(
-              isValidated
-                  ? Icons.check_circle
-                  : Icons.radio_button_unchecked,
-              color: isValidated
-                  ? Colors.green
-                  : Colors.grey,
-            ),
-
-            const SizedBox(width: 12),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-
-                  const Text(
-                    "6-DIGIT BARCODE",
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-
-                  const SizedBox(height: 2),
-
-                  Text(
-                    barcode['code'] ?? '',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          // Body
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
-                const Text(
-                  "PIECES",
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w600,
+                // Validated barcodes grid (3 per row)
+                if (validatedBarcodes.isNotEmpty) ...[
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 6,
+                      mainAxisSpacing: 6,
+                      childAspectRatio: 2.4,
+                    ),
+                    itemCount: validatedBarcodes.length,
+                    itemBuilder: (context, i) {
+                      final b = validatedBarcodes[i];
+                      return _buildBarcodeChip(boxIndex, b['originalIndex'] as int, b);
+                    },
                   ),
-                ),
+                  const SizedBox(height: 10),
+                ],
 
-                Text(
-                  "$count",
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                // Active (input) barcodes
+                if (activeBarcodes.isEmpty && validatedBarcodes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No barcodes added yet',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                    ),
+                  )
+                else
+                  ...activeBarcodes.map((barcode) {
+                    final int originalIndex = barcode['originalIndex'] as int;
+                    return _buildBarcodeEntry(boxIndex, originalIndex, barcode);
+                  }),
+
+                const SizedBox(height: 6),
               ],
             ),
-
-            if (count > 1)
-              Container(
-                margin: const EdgeInsets.only(left: 12),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade200,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  "×$count",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepOrange,
-                  ),
-                  
-                ),
-                
-              ),
-              const SizedBox(width: 8),
-
-IconButton(
-  icon: const Icon(
-    Icons.close,
-    color: Colors.red,
-    size: 18,
-  ),
-  onPressed: () {
-    _removeMergedBarcode(
-      boxIndex,
-      barcode['code'],
+          ),
+        ],
+      ),
     );
-  },
-),
-          ],
-        ),
-      ],
-    ),
-  );
-}
+  }
+
+  Widget _buildBarcodeChip(int boxIndex, int originalIndex, Map<String, dynamic> barcode) {
+    final code = barcode['code']?.toString().trim() ?? '';
+    final bool isError = barcode['isError'] == true;
+
+    // Count occurrences of this code among validated barcodes in this box
+    int occurrenceCount = 0;
+    for (var bar in boxes[boxIndex]['barcodes']) {
+      if (bar['code']?.toString().trim() == code && bar['isValidated'] == true) {
+        occurrenceCount++;
+      }
+    }
+
+    final bgColor = isError ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9);
+    final borderColor = isError ? const Color(0xFFEF9A9A) : const Color(0xFFA5D6A7);
+    final textColor = isError ? const Color(0xFFC62828) : const Color(0xFF2E7D32);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isError)
+            const Padding(
+              padding: EdgeInsets.only(right: 3),
+              child: Icon(Icons.error_outline, size: 12, color: Color(0xFFC62828)),
+            ),
+          Flexible(
+            child: Text(
+              occurrenceCount > 1 ? '$code *$occurrenceCount' : code,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: () => _removeBarcode(boxIndex, originalIndex),
+            child: Icon(
+              Icons.cancel,
+              size: 14,
+              color: isError ? const Color(0xFFC62828) : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBarcodeEntry(int boxIndex, int barcodeIndex, Map<String, dynamic> barcode) {
     final isLoading = barcode['isLoading'] ?? false;
     final isValidated = barcode['isValidated'] ?? false;
@@ -1495,10 +1502,10 @@ IconButton(
     return Container(
       key: ValueKey("box_${boxIndex}_barcode_${barcode['id']}"),
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: isValidated ? Colors.green.shade50 : Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: isValidated ? Colors.green.shade300 : Colors.grey[300]!,
         ),
@@ -1506,99 +1513,60 @@ IconButton(
       child: Row(
         children: [
           Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    const Text(
-                      '6-DIGIT BARCODE',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w600,
-                      ),
+                Expanded(
+                  child: TextFormField(
+                    controller: barcode['controller'] as TextEditingController,
+                    focusNode: barcode['focusNode'] as FocusNode?,
+                    autofocus: barcode['code'].toString().isEmpty,
+                    decoration: InputDecoration(
+                      hintText: 'Enter barcode',
+                      border: InputBorder.none,
+                      isDense: true,
+                      suffixIcon: isLoading
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: Padding(
+                                padding: EdgeInsets.all(10),
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : isValidated
+                              ? Icon(Icons.check_circle, size: 18, color: Colors.green.shade700)
+                              : null,
                     ),
-                    if (isValidated)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Icon(
-                          Icons.check_circle,
-                          size: 14,
-                          color: Colors.green.shade700,
-                        ),
-                      ),
-                    if (isLoading)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: SizedBox(
-                          height: 14,
-                          width: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: barcode['controller'] as TextEditingController,
-                        decoration: const InputDecoration(
-                          hintText: 'Enter barcode',
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
-                        onChanged: (value) => _handleManualBarcodeEntry(boxIndex, barcodeIndex, value),
-                        onFieldSubmitted: (value) => _validateBarcode(boxIndex, barcodeIndex, value),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.qr_code_scanner, size: 20, color: AppTheme.primaryColor),
-                      onPressed: () => _openScanner(boxIndex, barcodeIndex),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'PIECES',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w600,
+                    onChanged: (value) => _handleManualBarcodeEntry(boxIndex, barcodeIndex, value),
+                    onFieldSubmitted: (value) => _validateBarcode(boxIndex, barcodeIndex, value),
                   ),
                 ),
-                Text(
-                  barcode['pieces'].toString(),
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold),
+                IconButton(
+                  icon: const Icon(Icons.qr_code_scanner, size: 20, color: AppTheme.primaryColor),
+                  onPressed: () => _openScanner(boxIndex, barcodeIndex),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               ],
             ),
           ),
           IconButton(
             icon: Icon(
-              Icons.check,
-              size: 20,
-              color: isValidated ? Colors.green.shade700 : Colors.grey,
+              Icons.check_circle_outline,
+              size: 22,
+              color: isValidated ? Colors.green.shade700 : Colors.grey[400],
             ),
-            onPressed: isLoading ? null : () => _validateBarcode(boxIndex, barcodeIndex, barcode['code']?.toString() ?? ''),
+            onPressed: isLoading
+                ? null
+                : () => _validateBarcode(boxIndex, barcodeIndex, barcode['code']?.toString() ?? ''),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 16, color: Colors.red),
+            icon: const Icon(Icons.cancel, size: 18, color: Colors.red),
             onPressed: () => _removeBarcode(boxIndex, barcodeIndex),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
         ],
       ),
@@ -1670,7 +1638,7 @@ Map<String, int> get scannedSummary {
   final now = DateTime.now();
 
   if (_lastScanTime != null &&
-      now.difference(_lastScanTime!).inMilliseconds < 800) {
+      now.difference(_lastScanTime!).inMilliseconds < 1500) {
     return;
   }
 
