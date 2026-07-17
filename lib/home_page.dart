@@ -280,46 +280,42 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 255, 255, 255),
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: gradientColors,
+            ),
+          ),
+        ),
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: gradientColors,
-                ),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.person,
-                color: Colors.white,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
+            const Icon(Icons.person, color: Colors.white, size: 22),
+            const SizedBox(width: 10),
             Text(
-              ' ${userName.toUpperCase()}',
+              userName.toUpperCase(),
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 15,
                 letterSpacing: 0.8,
-                color: Color(0xFF0F172A),
+                color: Colors.white,
               ),
             ),
           ],
         ),
-        backgroundColor: Colors.white,
-        elevation: 1,
-        shadowColor: Colors.black.withOpacity(0.05),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           Container(
-            margin: const EdgeInsets.only(right: 8),
+            margin: const EdgeInsets.only(right: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
+              color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: const Icon(Icons.refresh, color: primaryColor),
+              icon: const Icon(Icons.refresh, color: Colors.white),
               onPressed: _fetchWorkOrders,
               tooltip: 'Refresh',
             ),
@@ -327,11 +323,11 @@ class _HomePageState extends State<HomePage> {
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
+              color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: const Icon(Icons.logout, color: Color(0xFFEF4444)),
+              icon: const Icon(Icons.logout, color: Colors.white),
               onPressed: _logout,
               tooltip: 'Logout',
             ),
@@ -602,7 +598,7 @@ class _HomePageState extends State<HomePage> {
                                               status: order['work_order_status']?.toString() ?? '',
                                               date: order['work_order_date']?.toString() ?? '',
                                               count: _parseInt(order['work_order_count']),
-                                              totalReceive: _parseInt(order['total_receive']),
+                                              totalReceive: _parseInt(order['total_receive']), 
                                             ),
                                           ),
                                         ).then((value) {
@@ -899,57 +895,53 @@ class WorkOrderCard extends StatelessWidget {
                               ],
                             ),
                             if (!isClosed)
-                              Row(
-                                children: [
-                                  ElevatedButton.icon(
-                                    onPressed: onTap,
-                                    icon: const Icon(Icons.visibility, size: 14, color: Colors.white),
-                                    label: const Text(
-                                      'VIEW',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 11,
-                                        letterSpacing: 0.5,
-                                        color: Colors.white,
+                              hasWorkingDetails
+                                  ? ElevatedButton.icon(
+                                      onPressed: onTap,
+                                      icon: const Icon(Icons.visibility, size: 14, color: Colors.white),
+                                      label: const Text(
+                                        'VIEW',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 11,
+                                          letterSpacing: 0.5,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        elevation: 0,
+                                        shadowColor: Colors.transparent,
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    )
+                                  : ElevatedButton.icon(
+                                      onPressed: onAddPackingSlip,
+                                      icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
+                                      label: const Text(
+                                        'ADD SLIP',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 11,
+                                          letterSpacing: 0.5,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: primaryColor,
+                                        elevation: 0,
+                                        shadowColor: Colors.transparent,
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       ),
                                     ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: hasWorkingDetails ? Colors.green : Colors.grey,
-                                      elevation: 0,
-                                      shadowColor: Colors.transparent,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  ElevatedButton.icon(
-                                    onPressed: onAddPackingSlip,
-                                    icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
-                                    label: const Text(
-                                      'ADD SLIP',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 11,
-                                        letterSpacing: 0.5,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: primaryColor,
-                                      elevation: 0,
-                                      shadowColor: Colors.transparent,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                ],
-                              ),
                           ],
                         ),
                       ],

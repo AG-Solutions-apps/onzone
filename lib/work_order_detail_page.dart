@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'app_theme.dart';
 import 'add_packing_slip_page.dart';
 import 'update_work_order_receive_page.dart';
+import 'receipt_view_page.dart';
 import 'api.dart';
 import 'package:http/http.dart' as http;
 
@@ -138,12 +139,13 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
         await Future.wait(filteredList.map((item) async {
           final id = item['id'];
           int slipQty = 0;
+          final Map<String, dynamic> mutableItem = Map<String, dynamic>.from(item);
 
           // Try to get quantity from parent item first as fallback
-          slipQty = _parseInt(item['work_order_rc_pcs'] ?? 
-                              item['work_order_rc_qty'] ?? 
-                              item['qty'] ?? 
-                              item['work_order_rc_count']);
+          slipQty = _parseInt(mutableItem['work_order_rc_pcs'] ?? 
+                              mutableItem['work_order_rc_qty'] ?? 
+                              mutableItem['qty'] ?? 
+                              mutableItem['work_order_rc_count']);
 
           if (id != null && id != 0) {
             try {
@@ -160,6 +162,16 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                 if (subData is Map) {
                   final subList = subData['workorderrcsubNew'] ?? subData['workorderrcsub'] ?? [];
                   slipQty = subList.length;
+                  
+                  final parentRc = subData['workorderrc'];
+                  if (parentRc is Map) {
+                    mutableItem['work_order_rc_box'] = parentRc['work_order_rc_box'];
+                    mutableItem['work_order_rc_pcs'] = parentRc['work_order_rc_pcs'];
+                    mutableItem['work_order_rc_count'] = parentRc['work_order_rc_count'];
+                    if (parentRc['work_order_rc_date'] != null) {
+                      mutableItem['work_order_rc_date'] = parentRc['work_order_rc_date'];
+                    }
+                  }
                 }
               }
             } catch (e) {
@@ -169,10 +181,16 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
 
           calculatedTotalReceive += slipQty;
           resolvedOrders.add({
-            ...Map<String, dynamic>.from(item),
+            ...mutableItem,
             'dynamic_qty': slipQty,
           });
         }));
+
+        resolvedOrders.sort((a, b) {
+          final rcNoA = _parseInt(a['work_order_rc_no'] ?? a['id']);
+          final rcNoB = _parseInt(b['work_order_rc_no'] ?? b['id']);
+          return rcNoB.compareTo(rcNoA);
+        });
 
         setState(() {
           receivedOrders = resolvedOrders;
@@ -246,6 +264,15 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     if (result == true && mounted) {
       _fetchReceivedOrders();
     }
+  }
+
+  void _navigateToReceiptView(int id) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReceiptViewPage(receivedId: id),
+      ),
+    );
   }
 
   Future<void> _confirmStatusUpdate(int id, dynamic rcNo) async {
@@ -375,47 +402,42 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF0F172A)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: gradientColors,
-                ),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.assignment,
-                color: Colors.white,
-                size: 18,
-              ),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: AppTheme.gradientColors,
             ),
-            const SizedBox(width: 12),
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Row(
+          children: [
+            Icon(Icons.assignment, color: Colors.white, size: 20),
+            SizedBox(width: 10),
             Text(
               'WORK ORDER DETAILS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
-                fontSize: 14,
-                letterSpacing: 1,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                fontSize: 15,
+                letterSpacing: 0.8,
+                color: Colors.white,
               ),
             ),
           ],
         ),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        elevation: 1,
-        shadowColor: Colors.black.withOpacity(0.05),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+              color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: IconButton(
-              icon: Icon(Icons.refresh, color: primaryColor),
+              icon: const Icon(Icons.refresh, color: Colors.white),
               onPressed: _fetchReceivedOrders,
             ),
           ),
@@ -783,64 +805,66 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                 },
               ),
             
-            const SizedBox(height: 20),
-
-            // Add Packing Slip Button
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: gradientColors,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: primaryColor.withOpacity(0.15),
-                    blurRadius: 20,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              // child: ElevatedButton.icon(
-              //   onPressed: () async {
-              //     final navigator = Navigator.of(context);
-              //     final result = await Navigator.push<bool>(
-              //       context,
-              //       MaterialPageRoute(
-              //         builder: (context) => AddPackingSlipPage(
-              //           workOrderId: widget.workOrderId,
-              //           workOrderRef: widget.workOrderRef,
-              //           brand: widget.brand,
-              //           workOrderNo: widget.workOrderNo,
-              //         ),
-              //       ),
-              //     );
-              //     if (result == true) {
-              //       navigator.pop(true);
-              //     }
-              //   },
-              //   icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
-              //   label: const Text(
-              //     'ADD PACKING SLIP',
-              //     style: TextStyle(
-              //       fontSize: 14,
-              //       fontWeight: FontWeight.w700,
-              //       letterSpacing: 1,
-              //       color: Colors.white,
-              //     ),
-              //   ),
-              //   style: ElevatedButton.styleFrom(
-              //     backgroundColor: Colors.transparent,
-              //     foregroundColor: Colors.white,
-              //     minimumSize: const Size(double.infinity, 56),
-              //     elevation: 0,
-              //     shape: RoundedRectangleBorder(
-              //       borderRadius: BorderRadius.circular(14),
-              //     ),
-              //   ),
-              // ),
-            ),
           ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0),
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: primaryColor.withOpacity(0.15),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                final result = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AddPackingSlipPage(
+                      workOrderId: widget.workOrderNo,
+                      workOrderRef: widget.workOrderRef,
+                      brand: widget.brand,
+                      workOrderNo: widget.workOrderNo,
+                    ),
+                  ),
+                );
+                if (result == true) {
+                  navigator.pop(true);
+                }
+              },
+              icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
+              label: const Text(
+                'ADD PACKING SLIP',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
+                  color: Colors.white,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 56),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -920,6 +944,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     final status = item['work_order_rc_status'] ?? item['status'] ?? 'Draft';
     final id = item['id'] ?? 0;
     final qty = item['dynamic_qty'] ?? item['work_order_rc_pcs'] ?? item['work_order_rc_qty'] ?? item['qty'] ?? 0;
+    final boxesCount = item['work_order_rc_box'] ?? item['box'] ?? 0;
 
     final cardStatus = status.toString().trim().toLowerCase();
 
@@ -967,66 +992,109 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'Qty: $qty',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: isDark ? Colors.grey[300] : const Color(0xFF475569),
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Text(
+                    date.toString(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
-              _buildStatusBadge(status.toString()),
+              Row(
+                children: [
+                  _buildStatusBadge(status.toString()),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(Icons.receipt_long, color: primaryColor, size: 20),
+                    onPressed: () => _navigateToReceiptView(id),
+                    tooltip: 'View Receipt',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                  ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(
-                Icons.calendar_today,
-                size: 12,
-                color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+              Row(
+                children: [
+                  Icon(
+                    Icons.inventory_2_outlined,
+                    size: 15,
+                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Boxes: $boxesCount',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              Text(
-                date.toString(),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isDark ? Colors.grey[300] : const Color(0xFF475569),
-                ),
+              const SizedBox(width: 24),
+              Row(
+                children: [
+                  Icon(
+                    Icons.confirmation_num_outlined,
+                    size: 15,
+                    color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Qty: $qty',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 16),
-              // const Icon(
-              //   Icons.branding_watermark,
-              //   size: 12,
-              //   color: Color(0xFF64748B),
-              // ),
-              const SizedBox(width: 6),
-              // Expanded(
-              //   child: Text(
-              //     brand.toString(),
-              //     style: const TextStyle(
-              //       fontSize: 11,
-              //       color: Color(0xFF475569),
-              //     ),
-              //     overflow: TextOverflow.ellipsis,
-              //   ),
-              // ),
             ],
           ),
           if (cardStatus == 'draft') ...[
             const SizedBox(height: 12),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                SizedBox(
+  height: 38,
+  child: ElevatedButton.icon(
+    onPressed: () => _showEditDialog(id),
+    icon: const Icon(
+      Icons.edit_rounded,
+      size: 18,
+      color: Colors.white,
+    ),
+    label: const Text(
+      'ADD MORE PIECES',
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.5,
+      ),
+    ),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: primaryColor,
+      foregroundColor: Colors.white,
+      elevation: 2,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 10,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+      ),
+    ),
+  ),
+),
                 ElevatedButton.icon(
                   onPressed: () => _confirmStatusUpdate(id, rcNo),
                   icon: const Icon(Icons.local_shipping_outlined, size: 16),
@@ -1051,16 +1119,33 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: Icon(Icons.edit, color: primaryColor),
-                  onPressed: () => _showEditDialog(id),
-                  tooltip: 'Edit Packing Slip',
-                  style: IconButton.styleFrom(
-                    backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+              ],
+            ),
+          ],
+          if (cardStatus != 'draft') ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: OutlinedButton.icon(
+                onPressed: () => _navigateToReceiptView(id),
+                icon: Icon(Icons.receipt_long, size: 16, color: primaryColor),
+                label: Text(
+                  'VIEW RECEIPT',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                    color: primaryColor,
                   ),
                 ),
-              ],
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: primaryColor.withOpacity(0.3)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
             ),
           ],
         ],
