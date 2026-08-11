@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'app_theme.dart';
+import 'app_utils.dart';
 import 'api.dart';
 import 'package:http/http.dart' as http;
 
@@ -68,6 +69,7 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
   bool isScannerOpen = false;
   int? scanningBoxIndex;
   int? scanningBarcodeIndex;
+  int selectedBoxIndex = 0;
 
   @override
   void initState() {
@@ -155,9 +157,9 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
           // Pre-populate text fields
           _factoryController.text = workOrderRcFactory ?? '';
           _workOrderIdController.text = workOrderRcId?.toString() ?? '';
-          _receiveDateController.text = workOrderRcDate ?? '';
+          _receiveDateController.text = formatAppDate(workOrderRcDate);
           _dcNoController.text = mainDetails['work_order_rc_dc_no']?.toString() ?? '';
-          _dcDateController.text = mainDetails['work_order_rc_dc_date']?.toString() ?? '';
+          _dcDateController.text = formatAppDate(mainDetails['work_order_rc_dc_date']);
           _brandController.text = workOrderRcBrand ?? '';
           _fabricReceived = mainDetails['work_order_rc_fabric_received']?.toString() ?? 'Yes';
           _fabricReceivedByController.text = mainDetails['work_order_rc_received_by']?.toString() ?? '';
@@ -795,7 +797,7 @@ void _updateTotals() {
 
     final Map<String, dynamic> payload = {
       "work_order_rc_dc_no": _dcNoController.text.trim(),
-      "work_order_rc_dc_date": _dcDateController.text.trim(),
+      "work_order_rc_dc_date": formatBackendDate(_dcDateController.text.trim()),
       "work_order_rc_box": totalBoxes.toString(),
       "work_order_rc_pcs": totalPieces.toString(),
       "work_order_rc_fabric_received": _fabricReceived,
@@ -1029,53 +1031,76 @@ void _updateTotals() {
   }
 
   Widget _buildDetailsStep() {
+    final bool isDesktop = MediaQuery.of(context).size.width >= 900;
+
+    final formContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final double width = constraints.maxWidth;
+            final crossAxisCount = width > 800 ? 4 : (width > 550 ? 2 : 1);
+            
+            return GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: crossAxisCount,
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              childAspectRatio: crossAxisCount == 1 ? 4.5 : (isDesktop ? 3.0 : 2.5),
+              children: [
+                _buildReadOnlyField('Factory', _factoryController),
+                _buildReadOnlyField('Work Order ID', _workOrderIdController),
+                _buildReadOnlyField('Receive Date', _receiveDateController),
+                _buildEditableField('DC No', _dcNoController),
+                _buildEditableField('DC Date', _dcDateController),
+                _buildReadOnlyField('Brand', _brandController),
+                _buildReadOnlyField('No of Box', _noOfBoxController, hint: 'Auto-calculated'),
+                _buildReadOnlyField('Total No of Pcs', _totalPiecesController, hint: 'Auto-calculated'),
+                _buildDropdownField('Fabric Received *'),
+                _buildEditableField('Fabric Received By', _fabricReceivedByController),
+                _buildEditableField('Fabric Left Over', _fabricLeftOverController),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        // Remarks field (spans full width)
+        TextFormField(
+          controller: _remarksController,
+          maxLines: 4,
+          decoration: InputDecoration(
+            labelText: 'Remarks',
+            hintText: 'Enter remarks here (optional)',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            filled: true,
+            fillColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+
     return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final double width = constraints.maxWidth;
-              final crossAxisCount = width > 800 ? 4 : (width > 550 ? 2 : 1);
-              
-              return GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-                childAspectRatio: crossAxisCount == 1 ? 4.5 : 2.5,
-                children: [
-                  _buildReadOnlyField('Factory', _factoryController),
-                  _buildReadOnlyField('Work Order ID', _workOrderIdController),
-                  _buildReadOnlyField('Receive Date', _receiveDateController),
-                  _buildEditableField('DC No', _dcNoController),
-                  _buildEditableField('DC Date', _dcDateController),
-                  _buildReadOnlyField('Brand', _brandController),
-                  _buildReadOnlyField('No of Box', _noOfBoxController, hint: 'Auto-calculated'),
-                  _buildReadOnlyField('Total No of Pcs', _totalPiecesController, hint: 'Auto-calculated'),
-                  _buildDropdownField('Fabric Received *'),
-                  _buildEditableField('Fabric Received By', _fabricReceivedByController),
-                  _buildEditableField('Fabric Left Over', _fabricLeftOverController),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          // Remarks field (spans full width)
-          TextFormField(
-            controller: _remarksController,
-            maxLines: 4,
-            decoration: InputDecoration(
-              labelText: 'Remarks',
-              hintText: 'Enter remarks here (optional)',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              filled: true,
-              fillColor: Colors.white,
-            ),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(24),
+      child: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1000),
+                child: Card(
+                  elevation: 4,
+                  shadowColor: Colors.black.withOpacity(0.04),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  color: Colors.white,
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: formContent,
+                  ),
+                ),
+              ),
+            )
+          : formContent,
     );
   }
 
@@ -1135,93 +1160,517 @@ void _updateTotals() {
     );
   }
 
-  Widget _buildBarcodesStep() {
+  Widget _buildDesktopBoxStatusButton(int boxIndex) {
+    final box = boxes[boxIndex];
+    final bool isValidating = box['isValidatingBox'] == true;
+    final bool isBoxValidated = box['isBoxValidated'] == true;
+
+    if (!isBoxValidated) {
+      return ElevatedButton.icon(
+        onPressed: isValidating ? null : () => _validateBox(boxIndex),
+        icon: isValidating
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : const Icon(Icons.check_circle_outline, size: 16, color: Colors.white),
+        label: const Text('VALIDATE BOX', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF10B981),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
+    } else {
+      return OutlinedButton.icon(
+        onPressed: () {
+          setState(() {
+            boxes[boxIndex]['isBoxValidated'] = false;
+            for (var b in boxes[boxIndex]['barcodes']) {
+              b['isError'] = false;
+            }
+          });
+        },
+        icon: const Icon(Icons.refresh, size: 16, color: Color(0xFFEF4444)),
+        label: const Text('RE-VALIDATE'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFEF4444),
+          side: const BorderSide(color: Color(0xFFEF4444)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildDesktopActiveBoxContent(int boxIndex) {
+    final box = boxes[boxIndex];
+    final barcodes = box['barcodes'] as List<dynamic>;
+
+    final List<Map<String, dynamic>> dbBarcodes = [];
+    final List<Map<String, dynamic>> newValidatedBarcodes = [];
+    final List<Map<String, dynamic>> activeBarcodes = [];
+
+    final Set<String> dbCodes = {};
+    int totalDbPieces = 0;
+
+    for (var barcode in barcodes) {
+      final code = barcode['code']?.toString().trim() ?? '';
+      final bool isBarcodeFromDb = barcode['isFromDb'] == true;
+      final isValidated = barcode['isValidated'] == true;
+      if (code.isNotEmpty && isBarcodeFromDb) {
+        dbCodes.add(code);
+        if (isValidated) {
+          totalDbPieces++;
+        }
+      }
+    }
+
+    final Set<String> seenDbCodes = {};
+    final Set<String> seenNewCodes = {};
+
+    for (int i = 0; i < barcodes.length; i++) {
+      final barcode = barcodes[i];
+      final code = barcode['code']?.toString().trim() ?? '';
+      final isValidated = barcode['isValidated'] == true;
+      final bool isBarcodeFromDb = barcode['isFromDb'] == true;
+
+      if (code.isEmpty) {
+        activeBarcodes.add({...barcode, 'originalIndex': i});
+      } else if (isValidated) {
+        if (isBarcodeFromDb) {
+          if (!seenDbCodes.contains(code)) {
+            seenDbCodes.add(code);
+            dbBarcodes.add({...barcode, 'originalIndex': i});
+          }
+        } else {
+          if (!seenNewCodes.contains(code)) {
+            seenNewCodes.add(code);
+            newValidatedBarcodes.add({...barcode, 'originalIndex': i});
+          }
+        }
+      } else {
+        activeBarcodes.add({...barcode, 'originalIndex': i});
+      }
+    }
+
+    box['showSavedBarcodes'] = box['showSavedBarcodes'] ?? false;
+    final bool showSaved = box['showSavedBarcodes'] == true;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // 1. New validated barcodes rendered as Wrap tags flow
+        if (newValidatedBarcodes.isNotEmpty) ...[
+          const Text(
+            'NEW VALIDATED BARCODES',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF64748B),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: newValidatedBarcodes.map((barcode) {
+              return SizedBox(
+                width: 140,
+                child: _buildBarcodeChip(boxIndex, barcode['originalIndex'], barcode, canDelete: true),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 24),
+        ],
+
+        // 2. Active/editing barcodes inputs
+        const Text(
+          'PENDING / SCAN ENTRIES',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF64748B),
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...activeBarcodes.map((barcode) {
+          final int originalIndex = barcode['originalIndex'];
+          return _buildBarcodeEntry(boxIndex, originalIndex, barcode);
+        }),
+        const SizedBox(height: 24),
+
+        // 3. Collapsible database barcodes as Wrap flow
+        if (dbBarcodes.isNotEmpty) ...[
+          Row(
             children: [
-              Text(
-                'Barcode Entries (Box: $totalBoxes, Pieces: $totalPieces, Entries: $totalBarcodeEntries)',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: primaryColor),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Add boxes and barcodes below. You can type a 6-digit code or use the camera to scan.',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    box['showSavedBarcodes'] = !showSaved;
+                  });
+                },
+                icon: Icon(
+                  showSaved ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  size: 18,
+                ),
+                label: Text(
+                  '${showSaved ? "Hide" : "View"} Saved Barcodes ($totalDbPieces pieces)',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(100, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             ],
           ),
-        ),
+          if (showSaved) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: dbBarcodes.map((barcode) {
+                return SizedBox(
+                  width: 140,
+                  child: _buildBarcodeChip(boxIndex, barcode['originalIndex'], barcode, canDelete: false),
+                );
+              }).toList(),
+            ),
+            if (boxes.length == 1) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Add one box to delete this box',
+                style: TextStyle(
+                  color: Color(0xFFEF4444),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _buildBarcodesStep() {
+    final bool isDesktop = MediaQuery.of(context).size.width >= 900;
+    
+    if (!isDesktop) {
+      // Mobile Layout: original list view
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Barcode Entries (Box: $totalBoxes, Pieces: $totalPieces, Entries: $totalBarcodeEntries)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: primaryColor),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Add boxes and barcodes below. You can type a 6-digit code or use the camera to scan.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: boxes.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey[400]),
+                        const SizedBox(height: 12),
+                        const Text('No boxes added yet'),
+                        TextButton(
+                          onPressed: () {
+                            final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
+                            if (boxes.isNotEmpty && !anyValidated) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please validate the current box before adding a new one'),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                              return;
+                            }
+                            _addBox();
+                          },
+                          child: const Text('Add Box'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: boxes.length,
+                    itemBuilder: (context, index) {
+                      final box = boxes[index];
+                      return _buildBoxCard(index, box);
+                    },
+                  ),
+          ),
+          if (totalPieces == 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'At least one barcode/piece is required to update.',
+                style: TextStyle(color: Colors.red[700], fontSize: 13, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ElevatedButton.icon(
+            onPressed: () {
+              final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
+              if (boxes.isNotEmpty && !anyValidated) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please validate the current box before adding a new one'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              _addBox();
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('Add Box'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryColor,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Desktop Split-Pane Dashboard layout
+    if (selectedBoxIndex >= boxes.length) {
+      selectedBoxIndex = boxes.isEmpty ? 0 : boxes.length - 1;
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Left Sidebar: Boxes List
         Expanded(
-          child: boxes.isEmpty
-              ? Center(
+          flex: 3,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              border: Border(
+                right: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(20),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey[400]),
-                      const SizedBox(height: 12),
-                      const Text('No boxes added yet'),
-                      TextButton(
-                        onPressed: () {
-                          final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
-                          if (boxes.isNotEmpty && !anyValidated) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Please validate the current box before adding a new one'),
-                                backgroundColor: Colors.orange,
-                              ),
-                            );
-                            return;
-                          }
-                          _addBox();
-                        },
-                        child: const Text('Add Box'),
+                      const Text(
+                        'BOX DIRECTORY',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$totalBoxes Boxes, $totalPieces Pieces',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
                       ),
                     ],
                   ),
-                )
-              : ListView.builder(
-                  itemCount: boxes.length,
-                  itemBuilder: (context, index) {
-                    final box = boxes[index];
-                    return _buildBoxCard(index, box);
-                  },
                 ),
-        ),
-        if (totalPieces == 0)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              'At least one barcode/piece is required to update.',
-              style: TextStyle(color: Colors.red[700], fontSize: 13, fontWeight: FontWeight.bold),
+                const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: boxes.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final box = boxes[index];
+                      final isSelected = index == selectedBoxIndex;
+                      final bool isBoxValidated = box['isBoxValidated'] == true;
+                      final int boxPcs = box['pieces'] ?? 0;
+
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            selectedBoxIndex = index;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isSelected ? primaryColor.withOpacity(0.08) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? primaryColor : const Color(0xFFE2E8F0),
+                              width: isSelected ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isBoxValidated ? Icons.check_circle : Icons.inventory_2_outlined,
+                                color: isBoxValidated ? Colors.green : (isSelected ? primaryColor : const Color(0xFF64748B)),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Box ${box['id']}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                        color: isSelected ? primaryColor : const Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$boxPcs pieces',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (boxes.length > 1)
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 18),
+                                  onPressed: () => _removeBox(index),
+                                  constraints: const BoxConstraints(),
+                                  padding: EdgeInsets.zero,
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
+                      if (boxes.isNotEmpty && !anyValidated) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please validate the current box before adding a new one'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      _addBox();
+                      setState(() {
+                        selectedBoxIndex = boxes.length - 1;
+                      });
+                    },
+                    icon: const Icon(Icons.add, color: Colors.white, size: 18),
+                    label: const Text('ADD BOX', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ElevatedButton.icon(
-          onPressed: () {
-            final bool anyValidated = boxes.any((b) => b['isBoxValidated'] == true);
-            if (boxes.isNotEmpty && !anyValidated) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Please validate the current box before adding a new one'),
-                  backgroundColor: Colors.orange,
+        ),
+        // Right Panel: Active Box Details & Barcode scanning/validation
+        Expanded(
+          flex: 7,
+          child: boxes.isEmpty
+              ? const Center(child: Text('No boxes available'))
+              : Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Active box header
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ACTIVE BOX DETAILS',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF64748B),
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Box ${boxes[selectedBoxIndex]['id']} (${boxes[selectedBoxIndex]['pieces']} pieces)',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Validate status action
+                          _buildDesktopBoxStatusButton(selectedBoxIndex),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      const Divider(color: Color(0xFFE2E8F0)),
+                      const SizedBox(height: 20),
+                      
+                      // Active box body contents
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: _buildDesktopActiveBoxContent(selectedBoxIndex),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              );
-              return;
-            }
-            _addBox();
-          },
-          icon: const Icon(Icons.add),
-          label: const Text('Add Box'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryColor,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 48),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
         ),
       ],
     );
@@ -1409,18 +1858,17 @@ void _updateTotals() {
                       final int originalIndex = barcode['originalIndex'];
                       return _buildBarcodeEntry(boxIndex, originalIndex, barcode);
                     }),
-
-                    // 2. New validated barcodes rendered as 3 per row grid
+                    // 2. New validated barcodes rendered as 3 per row grid (8 on desktop)
                     if (newValidatedBarcodes.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 3,
                           crossAxisSpacing: 8,
                           mainAxisSpacing: 8,
-                          childAspectRatio: 2.8,
+                          childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 2.8,
                         ),
                         itemCount: newValidatedBarcodes.length,
                         itemBuilder: (context, index) {
@@ -1429,7 +1877,7 @@ void _updateTotals() {
                         },
                       ),
                     ],
-
+ 
                     // 3. Collapsible database barcodes
                     if (dbBarcodes.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -1463,11 +1911,11 @@ void _updateTotals() {
                         GridView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 3,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
-                            childAspectRatio: 2.8,
+                            childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 2.8,
                           ),
                           itemCount: dbBarcodes.length,
                           itemBuilder: (context, index) {
@@ -1479,8 +1927,18 @@ void _updateTotals() {
                     ],
                   ];
                 })(),
-            const SizedBox(height: 8),
-            
+            if (boxes.length == 1)
+              const Padding(
+                padding: EdgeInsets.only(top: 10, bottom: 4),
+                child: Text(
+                  'Add one box to delete this box',
+                  style: TextStyle(
+                    color: Color(0xFFEF4444),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1680,8 +2138,8 @@ void _updateTotals() {
             child: Text(
               code,
               style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontSize: 17,
+                fontWeight: FontWeight.w500,
                 color: textColor,
               ),
               overflow: TextOverflow.ellipsis,
@@ -1692,8 +2150,8 @@ void _updateTotals() {
             Text(
               '*$occurrenceCount',
               style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
+                fontSize: 17,
+                fontWeight: FontWeight.w500,
                 color: isError ? const Color(0xFFC62828) : const Color(0xFFE65100),
               ),
             ),
@@ -1704,7 +2162,7 @@ void _updateTotals() {
               onTap: () => _removeBarcode(boxIndex, originalIndex),
               child: Icon(
                 Icons.cancel,
-                size: 14,
+                size: 22,
                 color: isError ? const Color(0xFFC62828) : Colors.red,
               ),
             ),

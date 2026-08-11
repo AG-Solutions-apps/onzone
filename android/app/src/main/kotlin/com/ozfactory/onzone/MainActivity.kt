@@ -1,4 +1,4 @@
-package com.example.onzone
+package com.ozfactory.onzone
 
 import io.flutter.embedding.android.FlutterActivity
 

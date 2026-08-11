@@ -4,6 +4,8 @@ class AppTheme {
   // Define all colors here. If you change them here, they will change across the entire app.
   static const Color primaryColor = Color(0xFF4F46E5); // Indigo
   static const Color secondaryColor = Color(0xFF7C3AED); // Violet
+  static const Color TColor = Color(0xFFF57C00);
+  
   
   static const List<Color> gradientColors = [
     primaryColor,
@@ -14,13 +16,18 @@ class AppTheme {
     Color.fromARGB(255, 255, 0, 0),
     Color.fromARGB(255, 255, 0, 8),
   ];
-
+static const List<Color> gradientColors2 = [
+    TColor,
+    TColor,
+  ];
   static const Color scaffoldBackgroundColor = Color(0xFFF8FAFC); // Slate-50
   static const Color cardBackgroundColor = Colors.white;
   static const Color appBarBackgroundColor = Colors.white;
   static const Color textColor = Color(0xFF0F172A); // Slate-900
   static const Color subtitleColor = Color(0xFF64748B); // Slate-500
   static const Color borderColor = Color(0xFFE2E8F0); // Slate-200
+
+
   
   // Status Badge Colors
   static const Color statusOnTheWayBg = Color(0xFFDBEAFE);
