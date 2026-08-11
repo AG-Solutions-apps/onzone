@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'app_theme.dart';
+import 'app_utils.dart';
 import 'add_packing_slip_page.dart';
 import 'update_work_order_receive_page.dart';
 import 'receipt_view_page.dart';
@@ -381,11 +382,27 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
     }
   }
 
+  Future<void> _onAddPackingSlipAction(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddPackingSlipPage(
+          workOrderId: widget.workOrderNo,
+          workOrderRef: widget.workOrderRef,
+          brand: widget.brand,
+          workOrderNo: widget.workOrderNo,
+        ),
+      ),
+    );
+    if (result == true) {
+      navigator.pop(true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    const isDark = false;
     const primaryColor = AppTheme.primaryColor;
-    const gradientColors = AppTheme.gradientColors;
 
     final status = widget.status ?? 'Pending';
     final statusColor = _getStatusColor(status);
@@ -443,244 +460,325 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Main Header Card with Circular Progress and Stats
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: const Color(0xFFE2E8F0),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
-                    blurRadius: 20,
-                    offset: const Offset(0, 4),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 900) {
+            // Unique desktop split pane view
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Left Column: Scrollable Metrics & Info Panel
+                Expanded(
+                  flex: 4,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: _buildDesktopDetailsCard(
+                      statusColor,
+                      statusIcon,
+                      status,
+                      progress,
+                      progressPercentage,
+                      count,
+                      pending,
+                    ),
                   ),
-                ],
-              ),
+                ),
+                // Custom divider line
+                Container(
+                  width: 1,
+                  color: const Color(0xFFE2E8F0),
+                ),
+                // Right Column: Scrollable Packing Slips Stream
+                Expanded(
+                  flex: 6,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildDesktopSlipsHeader(context),
+                        const SizedBox(height: 20),
+                        Expanded(
+                          child: _buildDesktopSlipsList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          } else {
+            // Mobile layout
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Top Row - Order Info and Status
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Left side - Order Info
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'ORDER REFERENCE',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF64748B),
-                                letterSpacing: 1,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.workOrderRef,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0F172A),
-                                letterSpacing: 0.3,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 8),
-                            // Factory tag - smaller size
-                            if (widget.factory != null && widget.factory != 'N/A')
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: const Color(0xFFE2E8F0),
-                                    width: 0.5,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.factory,
-                                      size: 12,
-                                      color: Color(0xFF64748B),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      widget.factory!,
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Color(0xFF475569),
-                                        fontWeight: FontWeight.w500,
-                                        letterSpacing: 0.3,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                _buildDetailChip('WO #${widget.workOrderNo}', Icons.tag),
-                                const SizedBox(width: 8),
-                                _buildDetailChip(widget.brand, Icons.branding_watermark),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.calendar_today,
-                                  size: 14,
-                                  color: Color(0xFF64748B),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Created: ${widget.date ?? 'N/A'}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF475569),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Right side - Status and Circular Progress
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          // Status Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: statusColor.withOpacity(0.25),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(statusIcon, size: 14, color: statusColor),
-                                const SizedBox(width: 6),
-                                Text(
-                                  status.toUpperCase(),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: statusColor,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          // Circular Progress
-                          SizedBox(
-                            width: 80,
-                            height: 80,
-                            child: Stack(
-                              children: [
-                                CustomPaint(
-                                  size: const Size(80, 80),
-                                  painter: CircularProgressPainter(
-                                    progress: progress,
-                                    color: primaryColor,
-                                  ),
-                                ),
-                                Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '$progressPercentage%',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                        ),
-                                      ),
-                                      Text(
-                                        'Complete',
-                                        style: TextStyle(
-                                          fontSize: 8,
-                                          color: isDark ? Colors.grey[400] : const Color(0xFF64748B),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  
+                  _buildMobileDetailsCard(statusColor, statusIcon, status, progress, progressPercentage, count, pending),
                   const SizedBox(height: 20),
-                  
-                  // Stats Row - Total Units, Received, Pending
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                        width: 0.5,
+                  _buildMobileSlipsHeader(),
+                  const SizedBox(height: 12),
+                  _buildMobileSlipsList(),
+                ],
+              ),
+            );
+          }
+        },
+      ),
+      bottomNavigationBar: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 900) {
+            return const SizedBox.shrink();
+          }
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0),
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: AppTheme.gradientColors,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: primaryColor.withOpacity(0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () => _onAddPackingSlipAction(context),
+                  icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
+                  label: const Text(
+                    'ADD PACKING SLIP',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 56),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMetadataRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 14, color: const Color(0xFF64748B)),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            fontSize: 13,
+            color: Color(0xFF64748B),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF0F172A),
+              fontWeight: FontWeight.bold,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopMetricCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 0.5),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              color: Color(0xFF64748B),
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopDetailsCard(
+    Color statusColor,
+    IconData statusIcon,
+    String status,
+    double progress,
+    int progressPercentage,
+    int count,
+    int pending,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'WORK ORDER DESCRIPTION',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF64748B),
+                  letterSpacing: 1.0,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: statusColor.withOpacity(0.25),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 12, color: statusColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor,
+                        letterSpacing: 0.5,
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            formatWorkOrderRef(widget.workOrderRef),
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF0F172A),
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Divider(color: Color(0xFFE2E8F0)),
+          const SizedBox(height: 16),
+          if (widget.factory != null && widget.factory != 'N/A') ...[
+            _buildMetadataRow(Icons.factory_outlined, 'Factory', widget.factory!),
+            const SizedBox(height: 12),
+          ],
+          _buildMetadataRow(Icons.tag, 'Work Order No', 'WO #${widget.workOrderNo}'),
+          const SizedBox(height: 12),
+          _buildMetadataRow(Icons.branding_watermark_outlined, 'Brand', widget.brand),
+          const SizedBox(height: 12),
+          _buildMetadataRow(Icons.calendar_today_outlined, 'Created Date', formatAppDate(widget.date)),
+          const SizedBox(height: 28),
+          const Divider(color: Color(0xFFE2E8F0)),
+          const SizedBox(height: 24),
+          // Circular Progress Dashboard Accent
+          Center(
+            child: SizedBox(
+              width: 120,
+              height: 120,
+              child: Stack(
+                children: [
+                  CustomPaint(
+                    size: const Size(120, 120),
+                    painter: CircularProgressPainter(
+                      progress: progress,
+                      color: primaryColor,
+                    ),
+                  ),
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        _buildMiniStat(
-                          'Total',
-                          count.toString(),
-                          Icons.inventory_2,
-                          primaryColor,
+                        Text(
+                          '$progressPercentage%',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F172A),
+                          ),
                         ),
-                        Container(
-                          width: 1,
-                          height: 30,
-                          color: const Color(0xFFE2E8F0),
-                        ),
-                        _buildMiniStat(
-                          'Received',
-                          totalReceive.toString(),
-                          Icons.check_circle,
-                          const Color(0xFF10B981),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 30,
-                          color: const Color(0xFFE2E8F0),
-                        ),
-                        _buildMiniStat(
-                          'Pending',
-                          pending.toString(),
-                          Icons.pending,
-                          pending < 0 ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                        const Text(
+                          'Complete',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -688,186 +786,512 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                 ],
               ),
             ),
-            
-            const SizedBox(height: 20),
-
-            // Received Orders Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: gradientColors,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.list_alt,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'PACKING SLIPS (${receivedOrders.length})',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
+          ),
+          const SizedBox(height: 32),
+          // Metric cards row
+          Row(
+            children: [
+              Expanded(
+                child: _buildDesktopMetricCard(
+                  'Total Units',
+                  count.toString(),
+                  Icons.inventory_2_outlined,
+                  primaryColor,
                 ),
-                IconButton(
-                  icon: Icon(Icons.refresh, color: primaryColor),
-                  onPressed: _fetchReceivedOrders,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Received Orders List
-            if (isReceivedLoading)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
-                  ),
-                ),
-              )
-            else if (receivedErrorMessage.isNotEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.error_outline,
-                        size: 48,
-                        color: Color(0xFF64748B),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        receivedErrorMessage,
-                        style: const TextStyle(color: Color(0xFF64748B)),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else if (receivedOrders.isEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.inbox,
-                        size: 48,
-                        color: Color(0xFF64748B),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'No packing slips found',
-                        style: TextStyle(
-                          color: Color(0xFF64748B),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Add a new packing slip for this work order',
-                        style: TextStyle(
-                          color: Color(0xFF94A3B8),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: receivedOrders.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final item = receivedOrders[index];
-                  return _buildReceivedOrderCard(item);
-                },
               ),
-            
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDesktopMetricCard(
+                  'Received Units',
+                  totalReceive.toString(),
+                  Icons.check_circle_outline,
+                  const Color(0xFF10B981),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDesktopMetricCard(
+                  'Pending Units',
+                  pending.toString(),
+                  Icons.pending_actions,
+                  pending < 0 ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopSlipsHeader(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.list_alt_rounded,
+              color: AppTheme.primaryColor,
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'PACKING SLIPS (${receivedOrders.length})',
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.refresh, color: AppTheme.primaryColor, size: 20),
+              onPressed: _fetchReceivedOrders,
+              tooltip: 'Refresh Slips',
+            ),
           ],
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 16.0),
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: gradientColors,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: primaryColor.withOpacity(0.15),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+        ElevatedButton.icon(
+          onPressed: () => _onAddPackingSlipAction(context),
+          icon: const Icon(Icons.add, size: 18, color: Colors.white),
+          label: const Text(
+            'ADD PACKING SLIP',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: Colors.white,
+              letterSpacing: 0.5,
             ),
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                final navigator = Navigator.of(context);
-                final result = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => AddPackingSlipPage(
-                      workOrderId: widget.workOrderNo,
-                      workOrderRef: widget.workOrderRef,
-                      brand: widget.brand,
-                      workOrderNo: widget.workOrderNo,
-                    ),
-                  ),
-                );
-                if (result == true) {
-                  navigator.pop(true);
-                }
-              },
-              icon: const Icon(Icons.add_box, size: 22, color: Colors.white),
-              label: const Text(
-                'ADD PACKING SLIP',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
-                  color: Colors.white,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 56),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryColor,
+            elevation: 2,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopSlipsList() {
+    if (isReceivedLoading) {
+      return const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+        ),
+      );
+    } else if (receivedErrorMessage.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Color(0xFF64748B)),
+            const SizedBox(height: 12),
+            Text(
+              receivedErrorMessage,
+              style: const TextStyle(color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+      );
+    } else if (receivedOrders.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.inbox, size: 48, color: Color(0xFF64748B)),
+            const SizedBox(height: 12),
+            Text(
+              'No packing slips found',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return ListView.separated(
+        itemCount: receivedOrders.length,
+        separatorBuilder: (context, index) => const SizedBox(height: 14),
+        itemBuilder: (context, index) {
+          final item = receivedOrders[index];
+          return _buildReceivedOrderCard(item);
+        },
+      );
+    }
+  }
+
+  Widget _buildMobileDetailsCard(
+    Color statusColor,
+    IconData statusIcon,
+    String status,
+    double progress,
+    int progressPercentage,
+    int count,
+    int pending,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFE2E8F0),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top Row - Order Info and Status
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Left side - Order Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ORDER REFERENCE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formatWorkOrderRef(widget.workOrderRef),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0F172A),
+                        letterSpacing: 0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    // Factory tag - smaller size
+                    if (widget.factory != null && widget.factory != 'N/A')
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFFE2E8F0),
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.factory,
+                              size: 12,
+                              color: Color(0xFF64748B),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              widget.factory!,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF475569),
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        _buildDetailChip('WO #${widget.workOrderNo}', Icons.tag),
+                        const SizedBox(width: 8),
+                        _buildDetailChip(widget.brand, Icons.branding_watermark),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Created: ${formatAppDate(widget.date)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF475569),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Right side - Status and Circular Progress
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Status Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: statusColor.withOpacity(0.25),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 14, color: statusColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: statusColor,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Circular Progress
+                  SizedBox(
+                    width: 80,
+                    height: 80,
+                    child: Stack(
+                      children: [
+                        CustomPaint(
+                          size: const Size(80, 80),
+                          painter: CircularProgressPainter(
+                            progress: progress,
+                            color: primaryColor,
+                          ),
+                        ),
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '$progressPercentage%',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const Text(
+                                'Complete',
+                                style: TextStyle(
+                                  fontSize: 8,
+                                  color: Color(0xFF64748B),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 20),
+          
+          // Stats Row - Total Units, Received, Pending
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFFE2E8F0),
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMiniStat(
+                  'Total',
+                  count.toString(),
+                  Icons.inventory_2,
+                  primaryColor,
+                ),
+                Container(
+                  width: 1,
+                  height: 30,
+                  color: const Color(0xFFE2E8F0),
+                ),
+                _buildMiniStat(
+                  'Received',
+                  totalReceive.toString(),
+                  Icons.check_circle,
+                  const Color(0xFF10B981),
+                ),
+                Container(
+                  width: 1,
+                  height: 30,
+                  color: const Color(0xFFE2E8F0),
+                ),
+                _buildMiniStat(
+                  'Pending',
+                  pending.toString(),
+                  Icons.pending,
+                  pending < 0 ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  Widget _buildMobileSlipsHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: AppTheme.gradientColors,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.list_alt,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'PACKING SLIPS (${receivedOrders.length})',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
+          onPressed: _fetchReceivedOrders,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSlipsList() {
+    if (isReceivedLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(40),
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+          ),
+        ),
+      );
+    } else if (receivedErrorMessage.isNotEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: Color(0xFF64748B),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                receivedErrorMessage,
+                style: const TextStyle(color: Color(0xFF64748B)),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (receivedOrders.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            children: const [
+              Icon(
+                Icons.inbox,
+                size: 48,
+                color: Color(0xFF64748B),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'No packing slips found',
+                style: TextStyle(
+                  color: Color(0xFF64748B),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Add a new packing slip for this work order',
+                style: TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      return ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: receivedOrders.length,
+        separatorBuilder: (context, index) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          final item = receivedOrders[index];
+          return _buildReceivedOrderCard(item);
+        },
+      );
+    }
   }
 
   Widget _buildDetailChip(String label, IconData icon) {
@@ -993,7 +1417,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    date.toString(),
+                    formatAppDate(date),
                     style: TextStyle(
                       fontSize: 11,
                       color: isDark ? Colors.grey[400] : const Color(0xFF64748B),

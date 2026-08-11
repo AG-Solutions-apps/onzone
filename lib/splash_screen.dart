@@ -2,9 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'login_page.dart';
-import 'home_page.dart';
+import 'factory_login_page.dart';
+import 'factory_home_page.dart';
+import 'portal_page.dart';
+import 'order/order_home_page.dart';
 import 'app_theme.dart';
+import 'store_management_page.dart';
 
 // ── Brand palette ────────────────────────────────────────────────────────────
 
@@ -99,7 +102,8 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
+    final String? token = prefs.getString('token');
+    final String? appMode = prefs.getString('app_mode');
 
     // Wait for animations to complete
     await Future.delayed(const Duration(seconds: 4));
@@ -107,19 +111,36 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     if (token != null && token.isNotEmpty) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomePage()),
-      );
+      if (appMode == 'factory') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const FactoryHomePage()),
+        );
+      } else if (appMode == 'store') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const StoreManagementPage()),
+        );
+      } else if (appMode == 'order') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const OrderHomePage()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const PortalPage()),
+        );
+      }
     } else {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const LoginPage()),
+        MaterialPageRoute(builder: (context) => const PortalPage()),
       );
     }
   }
 
-  // ── Build ────────────────────────────────────────────────────────────────
+  // ── Build ────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(

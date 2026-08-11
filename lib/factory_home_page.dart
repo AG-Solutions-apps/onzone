@@ -3,18 +3,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'app_theme.dart';
+import 'app_utils.dart';
 import 'work_order_detail_page.dart';
 import 'add_packing_slip_page.dart';
 import 'api.dart';
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+class FactoryHomePage extends StatefulWidget {
+  const FactoryHomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<FactoryHomePage> createState() => _FactoryHomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _FactoryHomePageState extends State<FactoryHomePage> {
   String userName = 'User';
   String userEmail = '';
   String userMobile = '';
@@ -31,13 +32,20 @@ class _HomePageState extends State<HomePage> {
   int itemsPerPage = 1000;
   int totalPages = 1;
 
-
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _fetchWorkOrders();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
@@ -206,13 +214,31 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _updateDisplayedOrders() {
+    List<dynamic> filtered = workOrders;
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      filtered = workOrders.where((order) {
+        final woNo = (order['work_order_no'] ?? '').toString().toLowerCase();
+        final woRef = (order['work_order_ref'] ?? '').toString().toLowerCase();
+        final trimmedRef = formatWorkOrderRef(order['work_order_ref']?.toString()).toLowerCase();
+        final brand = (order['work_order_brand'] ?? '').toString().toLowerCase();
+        final factory = (order['work_order_factory'] ?? '').toString().toLowerCase();
+
+        return woNo.contains(query) ||
+               woRef.contains(query) ||
+               trimmedRef.contains(query) ||
+               brand.contains(query) ||
+               factory.contains(query);
+      }).toList();
+    }
+
     final startIndex = (currentPage - 1) * itemsPerPage;
     final endIndex = startIndex + itemsPerPage;
     
-    if (startIndex < workOrders.length) {
-      displayedOrders = workOrders.sublist(
+    if (startIndex < filtered.length) {
+      displayedOrders = filtered.sublist(
         startIndex,
-        endIndex > workOrders.length ? workOrders.length : endIndex
+        endIndex > filtered.length ? filtered.length : endIndex
       );
     } else {
       displayedOrders = [];
@@ -363,6 +389,61 @@ class _HomePageState extends State<HomePage> {
                   'Closed work orders',
                 ),
               ],
+            ),
+          ),
+
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                  currentPage = 1;
+                  _updateDisplayedOrders();
+                });
+              },
+              decoration: InputDecoration(
+                hintText: 'Search Work Order No, Reference, Brand...',
+                hintStyle: const TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 14,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  color: Color(0xFF64748B),
+                  size: 20,
+                ),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Color(0xFF64748B), size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                            currentPage = 1;
+                            _updateDisplayedOrders();
+                          });
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: primaryColor, width: 1.5),
+                ),
+              ),
             ),
           ),
 
@@ -566,57 +647,205 @@ class _HomePageState extends State<HomePage> {
                               ],
                             ),
                           )
-                        : Column(
-                            children: [
-                              Expanded(
-                                child: ListView.builder(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  itemCount: displayedOrders.length,
-                                  itemBuilder: (context, index) {
-                                    final order = displayedOrders[index];
-                                    final totalReceive = _parseInt(order['total_receive']);
-                                    final ref = order['work_order_ref']?.toString() ?? '';
-                                    final hasWorkingDetails = totalReceive > 0 || receivedOrdersList.any((item) {
-                                      final itemRef = item['work_order_rc_w_ref']?.toString() ?? '';
-                                      return itemRef.trim().toLowerCase() == ref.trim().toLowerCase();
-                                    });
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              if (constraints.maxWidth >= 900) {
+                                return _buildDesktopTable(context, primaryColor, isDark);
+                              } else {
+                                return Column(
+                                  children: [
+                                    Expanded(
+                                      child: ListView.builder(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                                        itemCount: displayedOrders.length,
+                                        itemBuilder: (context, index) {
+                                          final order = displayedOrders[index];
+                                          final totalReceive = _parseInt(order['total_receive']);
+                                          final ref = order['work_order_ref']?.toString() ?? '';
+                                          final hasWorkingDetails = totalReceive > 0 || receivedOrdersList.any((item) {
+                                            final itemRef = item['work_order_rc_w_ref']?.toString() ?? '';
+                                            return itemRef.trim().toLowerCase() == ref.trim().toLowerCase();
+                                          });
 
-                                    return WorkOrderCard(
-                                      order: order,
-                                      isClosed: selectedTab == 'Closed',
-                                      hasWorkingDetails: hasWorkingDetails,
-                                      onTap: () {
-                                        Navigator.push<bool>(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => WorkOrderDetailPage(
-                                              workOrderRef: order['work_order_ref']?.toString() ?? '',
-                                              workOrderId: _parseInt(order['id']),
-                                              workOrderNo: _parseInt(order['work_order_no']),
-                                              brand: order['work_order_brand']?.toString() ?? '',
-                                              factory: order['work_order_factory']?.toString() ?? '',
-                                              status: order['work_order_status']?.toString() ?? '',
-                                              date: order['work_order_date']?.toString() ?? '',
-                                              count: _parseInt(order['work_order_count']),
-                                              totalReceive: _parseInt(order['total_receive']), 
-                                            ),
-                                          ),
-                                        ).then((value) {
-                                          if (value == true) {
-                                            _fetchWorkOrders();
-                                          }
-                                        });
-                                      },
-                                      onAddPackingSlip: () => _onAddPackingSlip(order),
-                                    );
-                                  },
-                                ),
-                              ),
-                              // Pagination Controls
-                            ],
+                                          return WorkOrderCard(
+                                            order: order,
+                                            isClosed: selectedTab == 'Closed',
+                                            hasWorkingDetails: hasWorkingDetails,
+                                            onTap: () {
+                                              Navigator.push<bool>(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) => WorkOrderDetailPage(
+                                                    workOrderRef: order['work_order_ref']?.toString() ?? '',
+                                                    workOrderId: _parseInt(order['id']),
+                                                    workOrderNo: _parseInt(order['work_order_no']),
+                                                    brand: order['work_order_brand']?.toString() ?? '',
+                                                    factory: order['work_order_factory']?.toString() ?? '',
+                                                    status: order['work_order_status']?.toString() ?? '',
+                                                    date: order['work_order_date']?.toString() ?? '',
+                                                    count: _parseInt(order['work_order_count']),
+                                                    totalReceive: _parseInt(order['total_receive']), 
+                                                  ),
+                                                ),
+                                              ).then((value) {
+                                                if (value == true) {
+                                                  _fetchWorkOrders();
+                                                }
+                                              });
+                                            },
+                                            onAddPackingSlip: () => _onAddPackingSlip(order),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+                            },
                           ),
               ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopTable(BuildContext context, Color primaryColor, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Card(
+        elevation: 4,
+        shadowColor: Colors.black.withOpacity(0.04),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+        ),
+        color: Colors.white,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            children: [
+              // Table Header
+              Container(
+                color: const Color(0xFFF8FAFC),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                child: Row(
+                  children: const [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'WORK ORDER NO',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        'REFERENCE',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'BRAND',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'DATE',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          'ACTIONS',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF64748B),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFE2E8F0)),
+              // Table Body
+              Expanded(
+                child: ListView.separated(
+                  itemCount: displayedOrders.length,
+                  separatorBuilder: (context, index) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                  itemBuilder: (context, index) {
+                    final order = displayedOrders[index];
+                    final totalReceive = _parseInt(order['total_receive']);
+                    final ref = order['work_order_ref']?.toString() ?? '';
+                    final hasWorkingDetails = totalReceive > 0 || receivedOrdersList.any((item) {
+                      final itemRef = item['work_order_rc_w_ref']?.toString() ?? '';
+                      return itemRef.trim().toLowerCase() == ref.trim().toLowerCase();
+                    });
+
+                    return _DesktopTableRow(
+                      order: order,
+                      isClosed: selectedTab == 'Closed',
+                      hasWorkingDetails: hasWorkingDetails,
+                      primaryColor: primaryColor,
+                      onTap: () {
+                        Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => WorkOrderDetailPage(
+                              workOrderRef: order['work_order_ref']?.toString() ?? '',
+                              workOrderId: _parseInt(order['id']),
+                              workOrderNo: _parseInt(order['work_order_no']),
+                              brand: order['work_order_brand']?.toString() ?? '',
+                              factory: order['work_order_factory']?.toString() ?? '',
+                              status: order['work_order_status']?.toString() ?? '',
+                              date: order['work_order_date']?.toString() ?? '',
+                              count: _parseInt(order['work_order_count']),
+                              totalReceive: _parseInt(order['total_receive']),
+                            ),
+                          ),
+                        ).then((value) {
+                          if (value == true) {
+                            _fetchWorkOrders();
+                          }
+                        });
+                      },
+                      onAddPackingSlip: () => _onAddPackingSlip(order),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -730,8 +959,8 @@ class WorkOrderCard extends StatelessWidget {
     const gradientColors = AppTheme.gradientColors;
 
     final workOrderNo = order['work_order_no']?.toString() ?? 'N/A';
-    final workOrderRef = order['work_order_ref']?.toString() ?? 'N/A';
-    final workOrderDate = order['work_order_date']?.toString() ?? 'N/A';
+    final workOrderRef = formatWorkOrderRef(order['work_order_ref']?.toString());
+    final workOrderDate = formatAppDate(order['work_order_date']?.toString());
     final brand = order['work_order_brand']?.toString() ?? 'N/A';
     final count = _parseInt(order['work_order_count']);
     final totalReceive = _parseInt(order['total_receive']);
@@ -950,6 +1179,191 @@ class WorkOrderCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopTableRow extends StatefulWidget {
+  final Map<String, dynamic> order;
+  final bool isClosed;
+  final bool hasWorkingDetails;
+  final Color primaryColor;
+  final VoidCallback onTap;
+  final VoidCallback onAddPackingSlip;
+
+  const _DesktopTableRow({
+    required this.order,
+    required this.isClosed,
+    required this.hasWorkingDetails,
+    required this.primaryColor,
+    required this.onTap,
+    required this.onAddPackingSlip,
+  });
+
+  @override
+  State<_DesktopTableRow> createState() => _DesktopTableRowState();
+}
+
+class _DesktopTableRowState extends State<_DesktopTableRow> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final workOrderNo = widget.order['work_order_no']?.toString() ?? 'N/A';
+    final workOrderRef = formatWorkOrderRef(widget.order['work_order_ref']?.toString());
+    final workOrderDate = formatAppDate(widget.order['work_order_date']?.toString());
+    final brand = widget.order['work_order_brand']?.toString() ?? 'N/A';
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        color: _isHovered ? const Color(0xFFF8FAFC) : Colors.white,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Row(
+              children: [
+                // Work Order No
+                Expanded(
+                  flex: 2,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: widget.isClosed ? AppTheme.red : widget.primaryColor,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'WO #$workOrderNo',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Reference
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    workOrderRef,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                ),
+                // Brand Badge
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: widget.primaryColor.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        brand.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: widget.primaryColor,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // Date
+                Expanded(
+                  flex: 2,
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_outlined,
+                        size: 14,
+                        color: Color(0xFF94A3B8),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        workOrderDate,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Actions
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: widget.isClosed
+                        ? const SizedBox.shrink()
+                        : widget.hasWorkingDetails
+                            ? ElevatedButton.icon(
+                                onPressed: widget.onTap,
+                                icon: const Icon(Icons.visibility, size: 14, color: Colors.white),
+                                label: const Text(
+                                  'VIEW',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              )
+                            : ElevatedButton.icon(
+                                onPressed: widget.onAddPackingSlip,
+                                icon: const Icon(Icons.qr_code_scanner, size: 14, color: Colors.white),
+                                label: const Text(
+                                  'ADD SLIP',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: widget.primaryColor,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
