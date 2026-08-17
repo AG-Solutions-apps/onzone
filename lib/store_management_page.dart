@@ -654,7 +654,7 @@ class _StoreManagementPageState extends State<StoreManagementPage> {
                         onPressed: _submitInventoryDialog,
                         icon: const Icon(Icons.cloud_upload, color: Colors.white),
                         label: Text(
-                          'Submit Scans (${_inventory.length} Boxes)',
+                          'Send To Stack (${_inventory.length} Boxes)',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
                         ),
                         style: ElevatedButton.styleFrom(

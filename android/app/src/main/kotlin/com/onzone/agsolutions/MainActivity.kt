@@ -1,4 +1,4 @@
-package com.ozfactory.onzone
+package com.onzone.agsolutions
 
 import io.flutter.embedding.android.FlutterActivity
 

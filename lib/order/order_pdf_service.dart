@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -29,24 +30,32 @@ const List<String> kTerms = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-// SIZE COLUMNS  ->  [top label, sub label]
-//   Sub label carries the shirt alias ("S/36").  Columns whose sub
-//   label has no "/" are pant-only.
+// SIZE SETS — a row shows ONLY the set matching its kind
 // ─────────────────────────────────────────────────────────────
-const List<List<String>> kSizeColumns = [
-  ['28', '28'],
-  ['30', '30'],
-  ['32', '32'],
-  ['34', '34'],
-  ['36', 'S/36'],
-  ['38', 'M/38'],
-  ['40', 'L/40'],
-  ['42', 'XL/42'],
-  ['44', '2XL/44'],
-  ['46', '3XL/46'],
-  ['48', '4XL/48'],
-  ['50', '5XL/50'],
+const List<String> kPantSizes = [
+  '28', '30', '32', '34', '36', '38', '40', '42', '44',
 ];
+
+// [alpha, number]  ->  rendered as "S" over "36".
+// Shared by full shirts and half shirts (half sizes arrive as "H-S-36").
+const List<List<String>> kShirtSizes = [
+  ['S', '36'],
+  ['M', '38'],
+  ['L', '40'],
+  ['XL', '42'],
+  ['2XL', '44'],
+  ['3XL', '46'],
+  ['4XL', '48'],
+  ['5XL', '50'],
+];
+
+/// What kind of row this is. Pant rows print under their own header;
+/// shirt and half-shirt rows SHARE one header, since their columns
+/// are identical.
+enum _Kind { pant, shirt, shirtHalf }
+
+/// The band above the size columns — identical for every table.
+const String _sizeBandTitle = 'SIZES';
 
 // ─────────────────────────────────────────────────────────────
 // PALETTE
@@ -63,15 +72,23 @@ final PdfColor _kBorder = PdfColor.fromInt(0xFF3C3C3C);
 const double _tableW = 546;
 const double _wQty = 36;
 const double _wRate = 42;
-const double _sizeColW = 21;
-final double _wSizeArea = _sizeColW * kSizeColumns.length;
-final double _wStyle = _tableW - _wSizeArea - _wQty - _wRate;
+const double _wSizeArea = 252; // shared by every size set
+const double _wStyle = _tableW - _wSizeArea - _wQty - _wRate; // 216
 
-const double _rowH = 24;
+const double _rowH = 24; // minimum / blank row height
 const double _headTopH = 12;
 const double _headSubH = 22;
 const double _headH = _headTopH + _headSubH;
 const double _totalH = 22;
+
+// Style-code cell text metrics — used to work out how many lines a
+// long label needs, and therefore how tall its row must be.
+const double _styleFontSize = 8;
+const double _styleLineH = 10; // line box height at that size
+const double _stylePadH = 12; // 8 left + 4 right
+const int _styleMaxLines = 6;
+/// Rough average glyph width for Helvetica-Bold at [_styleFontSize].
+const double _styleCharW = _styleFontSize * 0.52;
 
 const double _footerH = 64;
 const double _footerTermsW = 240;
@@ -97,24 +114,41 @@ const double _pageMarginV = 20;
 const double _pageMarginH = 24;
 
 final double _contentH = PdfPageFormat.a4.height - _pageMarginV * 2;
-final double _tableSpaceH =
-    _contentH - _kHeaderH - _headH - _totalH - _footerH;
+final double _tableSpaceH = _contentH - _kHeaderH - _totalH - _footerH;
 
-/// How many item rows fit on a single sheet before it has to spill
-/// onto a continuation page.
-final int _rowCapacity = (_tableSpaceH / _rowH).floor();
+/// Number of size columns for a kind.
+int _sizeCount(_Kind k) =>
+    k == _Kind.pant ? kPantSizes.length : kShirtSizes.length;
+
+/// Per-column widths that always sum to exactly [_wSizeArea].
+List<double> _colWidths(int n) {
+  final list = List<double>.filled(n, _wSizeArea / n);
+  double used = 0;
+  for (int i = 0; i < n - 1; i++) {
+    used += list[i];
+  }
+  list[n - 1] = _wSizeArea - used;
+  return list;
+}
+
+/// How tall a row must be for its style label to print in full.
+double _rowHeightFor(String label) {
+  final double usable = _wStyle - _stylePadH;
+  final int perLine = math.max(1, (usable / _styleCharW).floor());
+  final int lines =
+      math.max(1, math.min(_styleMaxLines, (label.length / perLine).ceil()));
+  if (lines <= 1) return _rowH;
+  return math.max(_rowH, lines * _styleLineH + 8);
+}
 
 // ─────────────────────────────────────────────────────────────
 // PUBLIC ENTRY POINT
 // ─────────────────────────────────────────────────────────────
 Future<void> downloadOrderPdf(BuildContext context, dynamic orderId) async {
-  final messenger = ScaffoldMessenger.of(context);
   try {
     final data = await _fetchOrder(orderId);
     if (data == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not load order details.')),
-      );
+      debugPrint('PDF: could not load order details for $orderId');
       return;
     }
 
@@ -126,27 +160,12 @@ Future<void> downloadOrderPdf(BuildContext context, dynamic orderId) async {
     final file = await _savePdf(bytes, fileName);
 
     if (file != null) {
-      final result = await OpenFilex.open(file.path);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(result.type == ResultType.done
-              ? 'Saved: ${file.path}'
-              : 'PDF saved to ${file.path}'),
-          action: SnackBarAction(
-            label: 'Share',
-            onPressed: () =>
-                Printing.sharePdf(bytes: bytes, filename: fileName),
-          ),
-        ),
-      );
+      await OpenFilex.open(file.path);
     } else {
       await Printing.sharePdf(bytes: bytes, filename: fileName);
     }
   } catch (e) {
     debugPrint('PDF error: $e');
-    messenger.showSnackBar(
-      SnackBar(content: Text('Failed to generate PDF: $e')),
-    );
   }
 }
 
@@ -158,7 +177,7 @@ Future<Map<String, dynamic>?> _fetchOrder(dynamic id) async {
   final token = prefs.getString('token');
 
   final res = await http.get(
-    Uri.parse('$baseUrl/fairOrderFormById/$id'),
+    Uri.parse('$baseUrl/fairOrderFormViewById/$id'),
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -200,97 +219,7 @@ Future<File?> _savePdf(Uint8List bytes, String name) async {
 }
 
 // ─────────────────────────────────────────────────────────────
-// ROW MODEL
-//   EXACTLY ONE ROW PER MAIN BARCODE — never split by dress type.
-//   Each sub-barcode under that main becomes an _Entry; its
-//   position prints in brackets beside the main barcode: (1, 2)
-// ─────────────────────────────────────────────────────────────
-class _Entry {
-  final bool isShirt;
-  final List<String> tokens;
-  final int qty;
-
-  _Entry({required this.isShirt, required this.tokens, required this.qty});
-}
-
-class _ItemRow {
-  final String style; // main barcode
-  final List<int> subNos; // [1, 2] — empty when there are no subs
-  final List<_Entry> entries;
-  final String rate;
-
-  _ItemRow({
-    required this.style,
-    required this.subNos,
-    required this.entries,
-    required this.rate,
-  });
-
-  /// "(1, 2)" — printed bold beside the main barcode. Empty when
-  /// the barcode has no sub-barcodes.
-  String get subLabel => subNos.isEmpty ? '' : '(${subNos.join(', ')})';
-}
-
-bool _isShirtType(dynamic v) =>
-    (v ?? '').toString().trim().toUpperCase().startsWith('S');
-
-List<_ItemRow> _buildRows(List subs) {
-  // group by MAIN barcode, preserving order of appearance
-  final Map<String, List<Map>> mains = {};
-  for (final s in subs) {
-    if (s is! Map) continue;
-    final main =
-        (s['fair_order_sub_barcode_main'] ?? s['fair_order_sub_barcode'] ?? '')
-            .toString();
-    mains.putIfAbsent(main, () => []).add(s);
-  }
-
-  final rows = <_ItemRow>[];
-
-  mains.forEach((main, list) {
-    // Does this main barcode actually carry sub-barcodes?
-    // A single entry whose own barcode equals the main is main-only.
-    final hasSubs = list.length > 1 ||
-        (list.first['fair_order_sub_barcode'] ?? '').toString() != main;
-
-    final entries = <_Entry>[];
-    final subNos = <int>[];
-    String rate = '';
-
-    for (int i = 0; i < list.length; i++) {
-      final s = list[i];
-
-      if (hasSubs) subNos.add(i + 1);
-
-      final tokens = (s['fair_order_sub_dress_size'] ?? '')
-          .toString()
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-
-      entries.add(_Entry(
-        isShirt: _isShirtType(s['fair_order_sub_dress_type']),
-        tokens: tokens,
-        qty: int.tryParse((s['fair_order_sub_quantity'] ?? '1').toString()) ?? 1,
-      ));
-
-      if (rate.isEmpty) rate = (s['fair_order_sub_mrp'] ?? '').toString();
-    }
-
-    rows.add(_ItemRow(
-      style: main,
-      subNos: subNos,
-      entries: entries,
-      rate: rate,
-    ));
-  });
-
-  return rows;
-}
-
-// ─────────────────────────────────────────────────────────────
-// SIZE MATCHING
+// SIZE RESOLUTION  (token -> column index within its own set)
 // ─────────────────────────────────────────────────────────────
 String _normAlpha(String s) => s
     .toUpperCase()
@@ -300,60 +229,274 @@ String _normAlpha(String s) => s
     .replaceAll('XXXL', '3XL')
     .replaceAll('XXL', '2XL');
 
-String _colAlpha(int i) {
-  final sub = kSizeColumns[i][1];
-  return sub.contains('/') ? sub.split('/')[0].toUpperCase() : '';
+/// Half sizes come through as "H-S-36", "H-2XL-44", ...
+bool _isHalfToken(String token) => _normAlpha(token).startsWith('H-');
+
+/// Drops the leading "H-" so the remainder resolves like a normal size.
+String _stripHalf(String token) {
+  final up = _normAlpha(token);
+  return up.startsWith('H-') ? up.substring(2) : up;
 }
 
-bool _shirtHit(List<String> tokens, String alpha, String num) {
-  if (alpha.isEmpty) return false;
-  for (final t in tokens) {
-    final up = _normAlpha(t);
-    if (up == '$alpha-$num') return true;
-    final p = up.split('-');
-    if (p.length == 2) {
-      if (p[0] == alpha || p[1] == num) return true;
-    } else if (up == alpha || up == num) {
-      return true;
+/// "34" / "34 " / "P-34"  ->  index in [kPantSizes], or -1
+int _pantIndex(String token) {
+  final digits = token.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits.isEmpty) return -1;
+  return kPantSizes.indexOf(digits);
+}
+
+/// "3XL-46" / "XXXL-46" / "46" / "3XL"  ->  index in [kShirtSizes], or -1
+/// Also handles "H-3XL-46" by stripping the half prefix first.
+int _shirtIndex(String token) {
+  final up = _stripHalf(token);
+  final parts = up.split('-');
+  final String alpha = parts.length == 2 ? parts[0] : up;
+  final String num =
+      parts.length == 2 ? parts[1] : up.replaceAll(RegExp(r'[^0-9]'), '');
+
+  for (int i = 0; i < kShirtSizes.length; i++) {
+    if (kShirtSizes[i][0] == alpha) return i;
+    if (num.isNotEmpty && kShirtSizes[i][1] == num) return i;
+  }
+  return -1;
+}
+
+/// Column index -> plain size label used in the half-size note.
+///   3  ->  "XL-42"
+String _halfLabel(int col) => '${kShirtSizes[col][0]}-${kShirtSizes[col][1]}';
+
+// ─────────────────────────────────────────────────────────────
+// ROW MODEL
+//   The API sends PRE-GROUPED records: each entry in "subs" carries
+//   a main-barcode list, a sub-barcode list, a dress type, a size
+//   list and a quantity.
+//
+//   A record splits along TWO axes:
+//
+//   1. BARCODE
+//      - Plain mains (no sub-barcodes) share ONE line, comma joined.
+//      - EACH main that carries sub-barcodes gets its OWN line, with
+//        its sub numbers/names inside the brackets:
+//          mains SOKTAS,SATIN,GEMS + subs SOKTAS1,SOKTAS2,SATIN1,GEMS4
+//            ->  SOKTAS (1, 2)
+//                SATIN (1)
+//                GEMS (4)
+//        A long bracket list WRAPS onto extra lines and the row grows
+//        taller — nothing is ever clipped.
+//
+//   2. SIZE SET — a shirt record can hold full sizes ("S-36") and
+//      half sizes ("H-S-36"); each set gets its own rows, but BOTH
+//      print under the SAME header since the columns are identical.
+//      Which sizes are the half ones is spelled out on the TOTAL row.
+//
+//   MATHS — a line carries a number of UNITS: the count of plain
+//   barcodes on it, or the count of entries inside its bracket.
+//     size cell   = the quantity chosen for that record
+//     line total  = units × quantity × number of selected sizes
+// ─────────────────────────────────────────────────────────────
+class _Row {
+  final _Kind kind;
+  final List<int> cols; // every size cell filled on this line
+  final int qty; // quantity per barcode per size
+  final int units; // barcodes (or bracket entries) on this line
+  final String label; // "9701, 9702"  /  "SOKTAS (1, 2, 3)"
+
+  _Row({
+    required this.kind,
+    required this.cols,
+    required this.qty,
+    required this.units,
+    required this.label,
+  });
+
+  /// Line total = barcodes × quantity × number of selected sizes.
+  int get total => units * qty * cols.length;
+
+  /// Tall enough for the whole style label to show.
+  double get height => _rowHeightFor(label);
+}
+
+/// One printed barcode label plus how many barcodes it stands for.
+class _Label {
+  final String text;
+  final int units;
+
+  const _Label(this.text, this.units);
+}
+
+bool _isShirtType(dynamic v) =>
+    (v ?? '').toString().trim().toUpperCase().startsWith('S');
+
+/// Splits a comma separated field into clean, de-duplicated parts.
+List<String> _splitList(dynamic raw) {
+  if (raw == null) return const [];
+  final out = <String>[];
+  for (final p in raw.toString().split(',')) {
+    final v = p.trim();
+    if (v.isNotEmpty && !out.contains(v)) out.add(v);
+  }
+  return out;
+}
+
+/// Real sub number = whatever the sub-barcode carries beyond its main.
+///   main 70702, sub 707023    ->  "3"
+///   main SOKTAS, sub SOKTAS10 ->  "10"
+String _subNumberOf(String main, String sub) {
+  final m = main.trim();
+  final s = sub.trim();
+  if (s.isEmpty || m.isEmpty || s == m) return '';
+  if (s.startsWith(m) && s.length > m.length) {
+    final suffix = s.substring(m.length);
+    final stripped = suffix.replaceFirst(RegExp(r'^[^0-9A-Za-z]+'), '');
+    return stripped.isEmpty ? suffix : stripped;
+  }
+  return '';
+}
+
+/// Numbers first (numerically), then names (alphabetically).
+int _bracketCompare(String a, String b) {
+  final ai = int.tryParse(a);
+  final bi = int.tryParse(b);
+  if (ai != null && bi != null) return ai.compareTo(bi);
+  if (ai != null) return -1;
+  if (bi != null) return 1;
+  return a.toUpperCase().compareTo(b.toUpperCase());
+}
+
+/// One record's barcodes -> the lines it should print as.
+///   [ "9701, 9702" ]                          (plain mains together)
+///   [ "SOKTAS (1, 2)", "SATIN (1)", ... ]     (one line per style)
+List<_Label> _splitLabels(List<String> mains, List<String> subs) {
+  // map every sub back to the main it belongs to
+  final Map<String, List<String>> bySubMain = {};
+  final unmatched = <String>[]; // subs with no resolvable main prefix
+
+  for (final sub in subs) {
+    // longest matching main wins, so SOKTAS beats SOK when both exist
+    String best = '';
+    for (final m in mains) {
+      if (sub.startsWith(m) && sub.length > m.length && m.length > best.length) {
+        best = m;
+      }
+    }
+    if (best.isEmpty) {
+      if (!unmatched.contains(sub)) unmatched.add(sub);
+      continue;
+    }
+    final n = _subNumberOf(best, sub);
+    if (n.isEmpty) continue;
+    bySubMain.putIfAbsent(best, () => []);
+    if (!bySubMain[best]!.contains(n)) bySubMain[best]!.add(n);
+  }
+
+  // a sub with no resolvable main still belongs to this record
+  if (unmatched.isNotEmpty && mains.isNotEmpty) {
+    final host = bySubMain.isNotEmpty ? bySubMain.keys.first : mains.first;
+    bySubMain.putIfAbsent(host, () => []);
+    for (final u in unmatched) {
+      if (!bySubMain[host]!.contains(u)) bySubMain[host]!.add(u);
+    }
+    unmatched.clear();
+  }
+
+  final out = <_Label>[];
+
+  // 1) every main WITHOUT subs shares a single comma-joined line
+  final plain = <String>[];
+  for (final m in mains) {
+    final nos = bySubMain[m];
+    if (nos == null || nos.isEmpty) plain.add(m);
+  }
+  if (plain.isNotEmpty) out.add(_Label(plain.join(', '), plain.length));
+
+  // 2) every main WITH subs gets a line of its own
+  for (final m in mains) {
+    final nos = bySubMain[m];
+    if (nos == null || nos.isEmpty) continue;
+    nos.sort(_bracketCompare);
+    out.add(_Label('$m (${nos.join(', ')})', nos.length));
+  }
+
+  // 3) no mains at all — the subs stand on their own
+  if (mains.isEmpty && unmatched.isNotEmpty) {
+    unmatched.sort(_bracketCompare);
+    out.add(_Label(unmatched.join(', '), unmatched.length));
+  }
+
+  return out;
+}
+
+List<_Row> _buildRows(List subs) {
+  final rows = <_Row>[];
+
+  for (final s in subs) {
+    if (s is! Map) continue;
+
+    final mains = _splitList(s['fair_order_sub_barcode_main']);
+    final subList = _splitList(s['fair_order_sub_barcode']);
+    if (mains.isEmpty && subList.isEmpty) continue;
+
+    final shirt = _isShirtType(s['fair_order_sub_dress_type']);
+    final qty =
+        int.tryParse((s['fair_order_sub_quantity'] ?? '1').toString()) ?? 1;
+
+    // selected size cells, split by kind
+    final Map<_Kind, List<int>> byKind = {};
+    for (final t in _splitList(s['fair_order_sub_dress_size'])) {
+      final _Kind kind;
+      final int col;
+
+      if (!shirt) {
+        kind = _Kind.pant;
+        col = _pantIndex(t);
+      } else if (_isHalfToken(t)) {
+        kind = _Kind.shirtHalf;
+        col = _shirtIndex(t);
+      } else {
+        kind = _Kind.shirt;
+        col = _shirtIndex(t);
+      }
+
+      if (col < 0) continue; // size outside the printed set
+      byKind.putIfAbsent(kind, () => []);
+      if (!byKind[kind]!.contains(col)) byKind[kind]!.add(col);
+    }
+    if (byKind.isEmpty) continue; // nothing printable on this record
+
+    final labels = _splitLabels(mains, subList);
+
+    // stable kind order: pant, shirt, shirt half
+    for (final kind in [_Kind.pant, _Kind.shirt, _Kind.shirtHalf]) {
+      final cols = byKind[kind];
+      if (cols == null || cols.isEmpty) continue;
+      cols.sort();
+
+      for (final label in labels) {
+        if (label.text.isEmpty || label.units == 0) continue;
+        rows.add(_Row(
+          kind: kind,
+          cols: List<int>.from(cols),
+          qty: qty,
+          units: label.units,
+          label: label.text,
+        ));
+      }
     }
   }
-  return false;
+
+  return rows;
 }
 
-bool _pantHit(List<String> tokens, String size) {
-  for (final t in tokens) {
-    final d = t.replaceAll(RegExp(r'[^0-9]'), '');
-    if (d == size) return true;
+/// Every half size used anywhere in the order, in canonical order:
+///   "Half Sizes - S-36, M-38"   — empty when no half sizes were selected.
+String _halfSizeNote(List<_Row> rows) {
+  final used = <int>{};
+  for (final r in rows) {
+    if (r.kind == _Kind.shirtHalf) used.addAll(r.cols);
   }
-  return false;
-}
-
-bool _entryHits(_Entry e, int col) => e.isShirt
-    ? _shirtHit(e.tokens, _colAlpha(col), kSizeColumns[col][0])
-    : _pantHit(e.tokens, kSizeColumns[col][0]);
-
-/// Value printed in one size cell = total quantity across every
-/// sub-barcode on this line that selected that size.
-int _colValue(_ItemRow r, int col) {
-  int v = 0;
-  for (final e in r.entries) {
-    if (_entryHits(e, col)) v += e.qty;
-  }
-  return v;
-}
-
-/// Row qty = sum of every size cell on the line.
-int _rowQty(_ItemRow r) {
-  int total = 0;
-  for (int i = 0; i < kSizeColumns.length; i++) {
-    total += _colValue(r, i);
-  }
-  if (total == 0) {
-    for (final e in r.entries) {
-      total += e.qty;
-    }
-  }
-  return total;
+  if (used.isEmpty) return '';
+  final cols = used.toList()..sort();
+  return 'Half Sizes - ${cols.map(_halfLabel).join(', ')}';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -367,12 +510,6 @@ String _fmtDate(dynamic raw) {
   if (d == null) return s;
   String two(int v) => v.toString().padLeft(2, '0');
   return '${two(d.day)}/${two(d.month)}/${d.year.toString().substring(2)}';
-}
-
-String _fmtRate(String raw) {
-  final v = raw.trim();
-  if (v.isEmpty) return '';
-  return 'Rs.$v';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -553,144 +690,144 @@ List<pw.Widget> _headerWidgets(Map<String, dynamic> d, pw.Font titleFont) => [
       pw.SizedBox(height: 8),
     ];
 
-// ── TABLE HEADER ─────────────────────────────────────────────
-pw.Widget _tableHeader() => pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Container(
-          width: _wStyle,
-          height: _headH,
-          alignment: pw.Alignment.centerLeft,
-          padding: const pw.EdgeInsets.only(left: 8),
-          decoration: _cell,
-          child: pw.Text('Style Code / Particulars',
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-        ),
-        pw.Column(
-          mainAxisSize: pw.MainAxisSize.min,
-          children: [
-            pw.Container(
-              width: _wSizeArea,
-              height: _headTopH,
-              alignment: pw.Alignment.center,
-              decoration: _cell,
-              child: pw.Text('SIZE',
-                  style: pw.TextStyle(
-                      fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: List.generate(
-                kSizeColumns.length,
-                (i) => pw.Container(
-                  width: _sizeColW,
-                  height: _headSubH,
-                  alignment: pw.Alignment.center,
-                  decoration: _cell,
-                  child: pw.Column(
-                    mainAxisSize: pw.MainAxisSize.min,
-                    mainAxisAlignment: pw.MainAxisAlignment.center,
-                    children: [
-                      pw.Text(kSizeColumns[i][0],
-                          style: pw.TextStyle(
-                              fontSize: 7, fontWeight: pw.FontWeight.bold)),
-                      pw.SizedBox(height: 1),
-                      pw.Text(kSizeColumns[i][1],
-                          maxLines: 1,
-                          style: pw.TextStyle(fontSize: 4.6, color: _kGrey)),
-                    ],
-                  ),
-                ),
+// ── TABLE HEADER (size columns follow the kind) ──────────────
+pw.Widget _tableHeader(_Kind kind) {
+  final bool pant = kind == _Kind.pant;
+  final int n = _sizeCount(kind);
+  final widths = _colWidths(n);
+
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Container(
+        width: _wStyle,
+        height: _headH,
+        alignment: pw.Alignment.centerLeft,
+        padding: const pw.EdgeInsets.only(left: 8),
+        decoration: _cell,
+        child: pw.Text('Style Code / Particulars',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+      ),
+      pw.Column(
+        mainAxisSize: pw.MainAxisSize.min,
+        children: [
+          pw.Container(
+            width: _wSizeArea,
+            height: _headTopH,
+            alignment: pw.Alignment.center,
+            decoration: _cell,
+            child: pw.Text(_sizeBandTitle,
+                style: pw.TextStyle(
+                    fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+          ),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: List.generate(
+              n,
+              (i) => pw.Container(
+                width: widths[i],
+                height: _headSubH,
+                alignment: pw.Alignment.center,
+                decoration: _cell,
+                child: pant
+                    ? pw.Text(kPantSizes[i],
+                        style: pw.TextStyle(
+                            fontSize: 7.5, fontWeight: pw.FontWeight.bold))
+                    : pw.Column(
+                        mainAxisSize: pw.MainAxisSize.min,
+                        mainAxisAlignment: pw.MainAxisAlignment.center,
+                        children: [
+                          pw.Text(kShirtSizes[i][0],
+                              style: pw.TextStyle(
+                                  fontSize: 7,
+                                  fontWeight: pw.FontWeight.bold)),
+                          pw.SizedBox(height: 1),
+                          pw.Text(kShirtSizes[i][1],
+                              style:
+                                  pw.TextStyle(fontSize: 5.5, color: _kGrey)),
+                        ],
+                      ),
               ),
             ),
-          ],
-        ),
-        pw.Container(
-          width: _wQty,
-          height: _headH,
-          alignment: pw.Alignment.center,
-          decoration: _cell,
-          child: pw.Text('Qty.',
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-        ),
-        pw.Container(
-          width: _wRate,
-          height: _headH,
-          alignment: pw.Alignment.center,
-          decoration: _cell,
-          child: pw.Text('Rate',
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-        ),
-      ],
-    );
+          ),
+        ],
+      ),
+      pw.Container(
+        width: _wQty,
+        height: _headH,
+        alignment: pw.Alignment.center,
+        decoration: _cell,
+        child: pw.Text('Qty.',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+      ),
+      pw.Container(
+        width: _wRate,
+        height: _headH,
+        alignment: pw.Alignment.center,
+        decoration: _cell,
+        child: pw.Text('Rate',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+      ),
+    ],
+  );
+}
 
 // ── ITEM ROW ─────────────────────────────────────────────────
-pw.Widget _itemRow(_ItemRow r) => pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Container(
-          width: _wStyle,
-          height: _rowH,
-          alignment: pw.Alignment.centerLeft,
-          padding: const pw.EdgeInsets.only(left: 8, right: 4),
-          decoration: _cell,
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text(r.style,
-                  maxLines: 1,
-                  style: pw.TextStyle(
-                      fontSize: 9.5, fontWeight: pw.FontWeight.bold)),
-              if (r.subLabel.isNotEmpty) ...[
-                pw.SizedBox(width: 6),
-                pw.Text(r.subLabel,
-                    maxLines: 1,
-                    style: pw.TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: pw.FontWeight.bold,
-                        color: _kInk)),
-              ],
-            ],
-          ),
-        ),
-        ...List.generate(
-          kSizeColumns.length,
-          (i) {
-            final v = _colValue(r, i);
-            return pw.Container(
-              width: _sizeColW,
-              height: _rowH,
-              alignment: pw.Alignment.center,
-              decoration: _cell,
-              child: pw.Text(v == 0 ? '' : '$v',
-                  style: const pw.TextStyle(fontSize: 8)),
-            );
-          },
-        ),
-        pw.Container(
-          width: _wQty,
-          height: _rowH,
+//   The row is as tall as its style label needs; every cell in it
+//   matches that height so the grid stays square.
+pw.Widget _itemRow(_Row r) {
+  final int n = _sizeCount(r.kind);
+  final widths = _colWidths(n);
+  final double h = r.height;
+
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Container(
+        width: _wStyle,
+        height: h,
+        alignment: pw.Alignment.centerLeft,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3)
+            .copyWith(left: 8),
+        decoration: _cell,
+        child: pw.Text(r.label,
+            maxLines: _styleMaxLines,
+            softWrap: true,
+            style: pw.TextStyle(
+                fontSize: _styleFontSize,
+                lineSpacing: 1.2,
+                fontWeight: pw.FontWeight.bold)),
+      ),
+      ...List.generate(
+        n,
+        (i) => pw.Container(
+          width: widths[i],
+          height: h,
           alignment: pw.Alignment.center,
           decoration: _cell,
-          child: pw.Text('${_rowQty(r)}',
-              style:
-                  pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+          child: pw.Text(r.cols.contains(i) ? '${r.qty}' : '',
+              style: const pw.TextStyle(fontSize: 8)),
         ),
-        pw.Container(
-          width: _wRate,
-          height: _rowH,
-          alignment: pw.Alignment.center,
-          decoration: _cell,
-          child: pw.Text(_fmtRate(r.rate),
-              maxLines: 1, style: const pw.TextStyle(fontSize: 8)),
-        ),
-      ],
-    );
+      ),
+      pw.Container(
+        width: _wQty,
+        height: h,
+        alignment: pw.Alignment.center,
+        decoration: _cell,
+        child: pw.Text('${r.total}',
+            style:
+                pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+      ),
+      // Rate — intentionally left blank
+      pw.Container(width: _wRate, height: h, decoration: _cell),
+    ],
+  );
+}
 
 // ── ELASTIC BLANK GRID ───────────────────────────────────────
 //   Fills every remaining point of vertical space with evenly
 //   divided empty rows, so the table always meets the terms block.
-pw.Widget _fillerGrid() => pw.CustomPaint(
+pw.Widget _fillerGrid(int sizeCols) => pw.CustomPaint(
       size: PdfPoint(_tableW, 0),
       painter: (canvas, size) {
         final double w = size.x;
@@ -715,13 +852,14 @@ pw.Widget _fillerGrid() => pw.CustomPaint(
             ..lineTo(w, i * rh);
         }
 
-        // vertical dividers — same column stops as the header
+        // vertical dividers — same column stops as the header above
+        final widths = _colWidths(sizeCols);
         double x = _wStyle;
         canvas
           ..moveTo(x, 0)
           ..lineTo(x, h);
-        for (int i = 0; i < kSizeColumns.length; i++) {
-          x += _sizeColW;
+        for (int i = 0; i < sizeCols; i++) {
+          x += widths[i];
           canvas
             ..moveTo(x, 0)
             ..lineTo(x, h);
@@ -736,18 +874,35 @@ pw.Widget _fillerGrid() => pw.CustomPaint(
     );
 
 // ── TOTAL ROW ────────────────────────────────────────────────
-pw.Widget _totalRow(int total) => pw.Row(
+//   Left of "TOTAL QUANTITY:" the chosen half sizes are listed,
+//   since the half rows share the full-size column labels.
+pw.Widget _totalRow(int total, String halfNote) => pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Container(
           width: _wStyle + _wSizeArea,
           height: _totalH,
-          alignment: pw.Alignment.centerRight,
-          padding: const pw.EdgeInsets.only(right: 10),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 8),
           decoration: _cell,
-          child: pw.Text('TOTAL QUANTITY:',
-              style:
-                  pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold)),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Expanded(
+                child: pw.Text(
+                  halfNote,
+                  maxLines: 1,
+                  style: pw.TextStyle(
+                      fontSize: 7.5,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _kInk),
+                ),
+              ),
+              pw.SizedBox(width: 8),
+              pw.Text('TOTAL QUANTITY:',
+                  style: pw.TextStyle(
+                      fontSize: 9.5, fontWeight: pw.FontWeight.bold)),
+            ],
+          ),
         ),
         pw.Container(
           width: _wQty,
@@ -859,7 +1014,41 @@ Future<Uint8List> _buildPdf(Map<String, dynamic> d) async {
   final doc = pw.Document();
   final subs = (d['subs'] is List) ? d['subs'] as List : [];
   final rows = _buildRows(subs);
-  final totalQty = rows.fold<int>(0, (p, r) => p + _rowQty(r));
+  final totalQty = rows.fold<int>(0, (p, r) => p + r.total);
+  final halfNote = _halfSizeNote(rows);
+
+  // Two sections at most: PANT, then SHIRT (full rows followed by
+  // half rows — they share one header, since the columns match).
+  final pantRows = rows.where((r) => r.kind == _Kind.pant).toList();
+  final shirtRows = [
+    ...rows.where((r) => r.kind == _Kind.shirt),
+    ...rows.where((r) => r.kind == _Kind.shirtHalf),
+  ];
+
+  final blocks = <pw.Widget>[];
+  int headerCount = 0;
+  int lastSizeCols = kPantSizes.length;
+
+  if (pantRows.isNotEmpty) {
+    blocks.add(_tableHeader(_Kind.pant));
+    blocks.addAll(pantRows.map(_itemRow));
+    headerCount++;
+    lastSizeCols = kPantSizes.length;
+  }
+  if (shirtRows.isNotEmpty) {
+    blocks.add(_tableHeader(_Kind.shirt));
+    blocks.addAll(shirtRows.map(_itemRow));
+    headerCount++;
+    lastSizeCols = kShirtSizes.length;
+  }
+  if (blocks.isEmpty) {
+    blocks.add(_tableHeader(_Kind.pant));
+    headerCount = 1;
+  }
+
+  // rows are no longer a uniform height — sum the real ones
+  final double rowsH = rows.fold<double>(0, (p, r) => p + r.height);
+  final double usedH = headerCount * _headH + rowsH;
 
   final titleFont = pw.Font.timesBold();
   final italicFont = pw.Font.helveticaOblique();
@@ -883,7 +1072,7 @@ Future<Uint8List> _buildPdf(Map<String, dynamic> d) async {
     ),
   );
 
-  if (rows.length <= _rowCapacity) {
+  if (usedH <= _tableSpaceH) {
     // ── SINGLE SHEET : blank grid stretches to the terms block ──
     doc.addPage(
       pw.Page(
@@ -893,10 +1082,9 @@ Future<Uint8List> _buildPdf(Map<String, dynamic> d) async {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             ..._headerWidgets(d, titleFont),
-            _tableHeader(),
-            ...rows.map(_itemRow),
-            pw.Expanded(child: _fillerGrid()),
-            _totalRow(totalQty),
+            ...blocks,
+            pw.Expanded(child: _fillerGrid(lastSizeCols)),
+            _totalRow(totalQty, halfNote),
             _footerBlock(d, italicFont),
           ],
         ),
@@ -916,9 +1104,8 @@ Future<Uint8List> _buildPdf(Map<String, dynamic> d) async {
         ),
         build: (ctx) => [
           ..._headerWidgets(d, titleFont),
-          _tableHeader(),
-          ...rows.map(_itemRow),
-          _totalRow(totalQty),
+          ...blocks,
+          _totalRow(totalQty, halfNote),
         ],
       ),
     );
