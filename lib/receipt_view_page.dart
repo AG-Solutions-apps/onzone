@@ -503,15 +503,15 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
             color: Colors.white,
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
-            onPressed: () => _scanAndShowBoxDetails(context),
-            tooltip: 'Scan Box Barcode',
-          ),
-        ],
-        elevation: 0,
-        backgroundColor: Colors.transparent,
+        // actions: [
+        //   IconButton(
+        //     icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+        //     onPressed: () => _scanAndShowBoxDetails(context),
+        //     tooltip: 'Scan Box Barcode',
+        //   ),
+        // ],
+        // elevation: 0,
+        // backgroundColor: Colors.transparent,
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())

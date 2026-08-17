@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
@@ -43,12 +44,37 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
   final List<Map<String, dynamic>> _addedItems = [];
   final FocusNode _barcodeFocusNode = FocusNode();
   DateTime? _deliveryDate;
+  bool _showSoftKeyboard = false;
   
   // Global size selection states
   final Set<String> _globalSelectedShirtSizes = {};
+  final Set<String> _globalSelectedHalfShirtSizes = {}; 
   final Set<String> _globalSelectedPantSizes = {};
   final Set<String> _selectedOrderBarcodes = {};
+ // Canonical size order â€” anything not listed sorts to the end, alphabetically.
+  static const List<String> _sizeOrder = [
+    // pant
+    '28', '30', '32', '34', '36', '38', '40', '42', '44',
+    // shirt full
+    'S-36', 'M-38', 'L-40', 'XL-42', '2XL-44', '3XL-46', '4XL-48', '5XL-50',
+    // shirt half
+    'H-S-36', 'H-M-38', 'H-L-40', 'H-XL-42', 'H-2XL-44', 'H-3XL-46', 'H-4XL-48', 'H-5XL-50',
+  ];
 
+  /// Sizes always read in canonical order, never tap order.
+  List<String> _sortedSizes(Iterable<String>? sizes) {
+    if (sizes == null) return const [];
+    final list = sizes.toList();
+    list.sort((a, b) {
+      final ai = _sizeOrder.indexOf(a);
+      final bi = _sizeOrder.indexOf(b);
+      if (ai == -1 && bi == -1) return a.compareTo(b);
+      if (ai == -1) return 1;
+      if (bi == -1) return -1;
+      return ai.compareTo(bi);
+    });
+    return list;
+  }
   @override
   void initState() {
     super.initState();
@@ -64,6 +90,28 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
     _barcodeInputController.dispose();
     _barcodeFocusNode.dispose();
     super.dispose();
+  }
+
+  void _toggleSoftKeyboard() async {
+    setState(() {
+      _showSoftKeyboard = !_showSoftKeyboard;
+    });
+
+    if (_showSoftKeyboard) {
+      _barcodeFocusNode.unfocus();
+      await Future.delayed(const Duration(milliseconds: 60));
+      if (mounted) {
+        _barcodeFocusNode.requestFocus();
+        SystemChannels.textInput.invokeMethod('TextInput.show');
+      }
+    } else {
+      SystemChannels.textInput.invokeMethod('TextInput.hide');
+      _barcodeFocusNode.unfocus();
+      await Future.delayed(const Duration(milliseconds: 60));
+      if (mounted) {
+        _barcodeFocusNode.requestFocus();
+      }
+    }
   }
 
   Future<void> _loadLocalStock() async {
@@ -88,7 +136,16 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
   }
 
   void _processBarcode(String barcode) {
-    FocusScope.of(context).unfocus();
+    final cleaned = barcode.trim();
+    _barcodeInputController.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_barcodeFocusNode.canRequestFocus) {
+        _barcodeFocusNode.requestFocus();
+      }
+    });
+
+    if (cleaned.isEmpty) return;
+
     setState(() {
       _searchedSingleItem = null;
       _searchedMultipleItems.clear();
@@ -97,9 +154,6 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       _scanErrorMessage = null;
     });
 
-    final cleaned = barcode.trim();
-    if (cleaned.isEmpty) return;
-
     // Find the item matching either full barcode or main barcode
     final matchedIndex = _localStock.indexWhere((item) =>
         item['fair_barcode'].toString().toLowerCase() == cleaned.toLowerCase() ||
@@ -107,20 +161,22 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
 
     if (matchedIndex == -1) {
       setState(() {
-        _scanErrorMessage = 'Barcode "$barcode" not found in local stock.';
+        _scanErrorMessage = 'Barcode "$cleaned" not found in local stock.';
       });
+      AppTheme.show(context, 
+        SnackBar(
+          content: Text('Barcode "$cleaned" not found in local stock.'),
+          backgroundColor: const Color(0xFF202C4D),
+          duration: const Duration(seconds: 2),
+        ),
+      );
       return;
     }
 
     final matchedItem = _localStock[matchedIndex];
     final String type = matchedItem['fair_barcode_type']?.toString().toUpperCase() ?? 'S';
 
-    if (type == 'S') {
-      setState(() {
-        _searchedSingleItem = Map<String, dynamic>.from(matchedItem);
-        _searchedSingleQuantity = 1;
-      });
-    } else {
+    if (type == 'M') {
       // Type is M (Multiple options)
       final String mainBarcode = matchedItem['fair_barcode_main']?.toString() ?? '';
       
@@ -137,13 +193,40 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       }
 
       setState(() {
+        _showSoftKeyboard = false;
         _searchedMultipleItems = subItems;
         for (var sub in subItems) {
           final subBarcode = sub['fair_barcode']?.toString() ?? '';
           _subBarcodeQuantities[subBarcode] = 1;
         }
       });
+      SystemChannels.textInput.invokeMethod('TextInput.hide');
       _showMultipleItemsPopup();
+    } else {
+      // Type is S (Single item) - directly add to order list!
+      final stock = matchedItem['stock'] ?? 0;
+      final barcodeVal = matchedItem['fair_barcode']?.toString() ?? '';
+      if (stock <= 0) {
+        setState(() {
+          _scanErrorMessage = 'Barcode "$barcodeVal" is out of stock!';
+        });
+        AppTheme.show(context, 
+          SnackBar(
+            content: Text('Cannot add: Barcode $barcodeVal is out of stock!'),
+            backgroundColor: Colors.red.shade800,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
+      _addSingleItemToOrderList(matchedItem);
+      AppTheme.show(context, 
+        SnackBar(
+          content: Text('Added barcode $barcodeVal to order.'),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
     }
   }
 
@@ -155,7 +238,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
     final stock = item['stock'] ?? 0;
     
     if (stock <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         const SnackBar(content: Text('Cannot add: This item is out of stock!')),
       );
       return;
@@ -170,7 +253,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
           _addedItems[existingIdx]['fair_order_sub_quantity'] += _searchedSingleQuantity;
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppTheme.show(context, 
           SnackBar(
             content: Text('Cannot add: Total quantity will exceed available stock of $stock'),
             duration: const Duration(seconds: 2),
@@ -193,7 +276,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       });
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppTheme.show(context, 
       SnackBar(content: Text('Added barcode $barcode to order.')),
     );
 
@@ -206,7 +289,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
 
   void _addMultipleToOrder() {
     if (_selectedSubBarcodes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         const SnackBar(content: Text('Please select at least one sub-barcode.')),
       );
       return;
@@ -220,7 +303,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       );
       final stock = sub['stock'] ?? 0;
       if (stock <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppTheme.show(context, 
           SnackBar(content: Text('Cannot add: Option $barcode is out of stock!')),
         );
         return;
@@ -244,7 +327,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
               _addedItems[existingIdx]['sizes'] = currentSizes;
             });
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
+            AppTheme.show(context, 
               SnackBar(
                 content: Text('Cannot add $barcode: Total quantity will exceed available stock of $stock'),
                 duration: const Duration(seconds: 2),
@@ -271,7 +354,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppTheme.show(context, 
       SnackBar(content: Text('Added $addedCount items to order.')),
     );
 
@@ -286,7 +369,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
 
   Future<void> _submitOrder() async {
     if (_addedItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         const SnackBar(content: Text('Please add at least one barcode to the order')),
       );
       return;
@@ -317,7 +400,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
           'fair_order_sub_quantity': item['fair_order_sub_quantity'],
           'fair_order_sub_barcode_type': item['fair_order_sub_barcode_type'],
           'fair_order_sub_dress_type': item['fair_order_sub_dress_type'] ?? '',
-          'fair_order_sub_dress_size': (item['sizes'] as Set<String>?)?.join(', ') ?? '',
+          'fair_order_sub_dress_size': _sortedSizes(item['sizes'] as Set<String>?).join(', '),
         }).toList(),
       };
 
@@ -367,13 +450,13 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
           final decoded = jsonDecode(response.body);
           errorMsg = decoded['message'] ?? decoded['error'] ?? response.body;
         } catch (_) {}
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppTheme.show(context, 
           SnackBar(content: Text('Error: $errorMsg')),
         );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         SnackBar(content: Text('Connection error: $e')),
       );
     } finally {
@@ -483,12 +566,12 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
     }
 
     if (addedCount > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         SnackBar(content: Text('Added $addedCount item(s) to order.')),
       );
     }
     if (notFound.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         SnackBar(
           content: Text('Barcodes not found: ${notFound.join(", ")}'),
           backgroundColor: const Color(0xFF202C4D),
@@ -496,7 +579,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
       );
     }
     if (outOfStock.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppTheme.show(context, 
         SnackBar(
           content: Text('Items out of stock: ${outOfStock.join(", ")}'),
           backgroundColor: Colors.red.shade800,
@@ -516,7 +599,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
           _addedItems[existingIdx]['fair_order_sub_quantity'] += 1;
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppTheme.show(context, 
           SnackBar(
             content: Text('Cannot add: Total quantity will exceed available stock of $stock'),
             duration: const Duration(seconds: 1),
@@ -678,20 +761,28 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
             const SizedBox(height: 20),
 
             // Retailer Mobile
+            // Retailer Mobile
             TextFormField(
               controller: _mobileController,
               keyboardType: TextInputType.phone,
+              maxLength: 10,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(10),
+              ],
               decoration: InputDecoration(
                 labelText: 'Retailer Mobile',
+                counterText: '',
                 prefixIcon: const Icon(Icons.phone, color: AppTheme.primaryColor),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
               validator: (value) {
-                if (value == null || value.trim().isEmpty) {
+                final v = value?.trim() ?? '';
+                if (v.isEmpty) {
                   return 'Please enter mobile number';
                 }
-                if (value.trim().length < 10) {
-                  return 'Please enter a valid mobile number';
+                if (v.length != 10) {
+                  return 'Mobile number must be exactly 10 digits';
                 }
                 return null;
               },
@@ -751,15 +842,36 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                 children: [
                   Expanded(
                     child: TextField(
+                      key: ValueKey<bool>(_showSoftKeyboard),
                       focusNode: _barcodeFocusNode,
                       controller: _barcodeInputController,
+                      autofocus: true,
+                      showCursor: true,
+                      keyboardType: _showSoftKeyboard ? TextInputType.text : TextInputType.none,
+                      textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
                         hintText: 'Enter barcode number...',
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () => _barcodeInputController.clear(),
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                _showSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard,
+                                color: _showSoftKeyboard ? AppTheme.primaryColor : Colors.grey.shade700,
+                              ),
+                              tooltip: _showSoftKeyboard ? 'Hide on-screen keyboard' : 'Show on-screen keyboard',
+                              onPressed: _toggleSoftKeyboard,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _barcodeInputController.clear();
+                                _barcodeFocusNode.requestFocus();
+                              },
+                            ),
+                          ],
                         ),
                       ),
                       onSubmitted: (value) => _processBarcode(value),
@@ -965,8 +1077,12 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
             if (dressType != null) {
               final cleanType = dressType.trim().toUpperCase();
               if (cleanType == 'S') {
-                sizes = ['S-36', 'M-38', 'L-40', 'XL-42', '2XL-44', '3XL-46', '4XL-48', '5XL-50'];
-              } else if (cleanType == 'P') {
+                sizes = [
+                  'S-36', 'M-38', 'L-40', 'XL-42', '2XL-44', '3XL-46', '4XL-48', '5XL-50',
+                  'H-S-36', 'H-M-38', 'H-L-40', 'H-XL-42', 'H-2XL-44', 'H-3XL-46', 'H-4XL-48', 'H-5XL-50',
+                ];
+              }
+              else if (cleanType == 'P') {
                 sizes = ['28', '30', '32', '34', '36', '38', '40', '42', '44'];
               }
             }
@@ -1034,6 +1150,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             final List<String> shirtSizes = ['S-36', 'M-38', 'L-40', 'XL-42', '2XL-44', '3XL-46', '4XL-48', '5XL-50'];
+            final List<String> halfShirtSizes = ['H-S-36', 'H-M-38', 'H-L-40', 'H-XL-42', 'H-2XL-44', 'H-3XL-46', 'H-4XL-48', 'H-5XL-50'];
             final List<String> pantSizes = ['28', '30', '32', '34', '36', '38', '40', '42', '44'];
 
             return AlertDialog(
@@ -1047,7 +1164,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text(
-                        'Shirt Sizes (S)',
+                        'Shirt Sizes (F)',
                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 13),
                       ),
                       const SizedBox(height: 8),
@@ -1063,6 +1180,48 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                                   _globalSelectedShirtSizes.remove(size);
                                 } else {
                                   _globalSelectedShirtSizes.add(size);
+                                }
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSelected ? AppTheme.primaryColor : Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSelected ? AppTheme.primaryColor : Colors.grey.shade300,
+                                ),
+                              ),
+                              child: Text(
+                                size,
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : Colors.black87,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const Divider(height: 24),
+                      const Text(
+                        'Shirt Sizes (H)',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 13),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: halfShirtSizes.map((size) {
+                          final isSelected = _globalSelectedHalfShirtSizes.contains(size);
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                if (isSelected) {
+                                  _globalSelectedHalfShirtSizes.remove(size);
+                                } else {
+                                  _globalSelectedHalfShirtSizes.add(size);
                                 }
                               });
                             },
@@ -1148,22 +1307,27 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                           ? _addedItems.where((item) => _selectedOrderBarcodes.contains(item['fair_order_sub_barcode']))
                           : _addedItems;
 
-                      for (var item in targets) {
+                                            for (var item in targets) {
                         final dressType = item['fair_order_sub_dress_type']?.toString().trim().toUpperCase() ?? '';
                         if (dressType == 'S') {
-                          item['sizes'] = Set<String>.from(_globalSelectedShirtSizes);
+                          item['sizes'] = <String>{
+                            ..._globalSelectedShirtSizes,
+                            ..._globalSelectedHalfShirtSizes,
+                          };
                         } else if (dressType == 'P') {
                           item['sizes'] = Set<String>.from(_globalSelectedPantSizes);
                         }
                       }
+
                       
                       // Clear selected cards and global sets
                       _selectedOrderBarcodes.clear();
                       _globalSelectedShirtSizes.clear();
+                      _globalSelectedHalfShirtSizes.clear();
                       _globalSelectedPantSizes.clear();
                     });
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppTheme.show(context, 
                       const SnackBar(content: Text('Selected sizes applied successfully.')),
                     );
                   },
@@ -1243,7 +1407,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.w500),
                 ),
                 Text(
-                  'MRP: ₹${item['fair_mrp'] ?? 'N/A'}',
+                  'MRP: â‚¹${item['fair_mrp'] ?? 'N/A'}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
                 ),
               ],
@@ -1302,7 +1466,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                                   _searchedSingleQuantity++;
                                 });
                               } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                AppTheme.show(context, 
                                   SnackBar(
                                     content: Text('Cannot exceed available stock of $stock'),
                                     duration: const Duration(seconds: 1),
@@ -1541,7 +1705,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                                                           _subBarcodeQuantities[barcode] = qty + 1;
                                                         });
                                                       } else {
-                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                        AppTheme.show(context, 
                                                           SnackBar(
                                                             content: Text('Cannot exceed available stock of $stock'),
                                                             duration: const Duration(seconds: 1),
@@ -1737,12 +1901,12 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                         children: [
                           const Icon(Icons.checkroom, size: 12, color: Colors.black54),
                           const SizedBox(width: 3),
-                          ConstrainedBox(
+                         ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 80),
                             child: Text(
                               (item['sizes'] as Set<String>?) == null || (item['sizes'] as Set<String>).isEmpty
                                   ? 'Sizes'
-                                  : (item['sizes'] as Set<String>).join(","),
+                                  : _sortedSizes(item['sizes'] as Set<String>).join(","),
                               style: const TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -1812,7 +1976,7 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
                               item['fair_order_sub_quantity'] = currentQty + 1;
                             });
                           } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppTheme.show(context, 
                               SnackBar(
                                 content: Text('Cannot exceed available stock of $stock'),
                                 duration: const Duration(seconds: 1),
@@ -1855,3 +2019,4 @@ class _OrderCreatePageState extends State<OrderCreatePage> {
     );
   }
 }
+
