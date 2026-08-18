@@ -4,10 +4,11 @@ import 'order_pdf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'app_theme.dart';
-import 'order_login_page.dart';
 import 'api.dart';
 import 'order_create_page.dart';
 import 'order_details_page.dart';
+import 'qr_dashboard_screen.dart';
+import 'stock_list_page.dart';
 
 class OrderHomePage extends StatefulWidget {
   const OrderHomePage({super.key});
@@ -127,6 +128,32 @@ dynamic _downloadingId;
         backgroundColor: primaryColor,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(Icons.crop_free, color: Colors.white, size: 28),
+                Icon(Icons.checkroom_rounded, color: Colors.white, size: 14),
+              ],
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const QrDashboardScreen()),
+              );
+            },
+            tooltip: 'QR Image Scanner',
+          ),
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const StockListPage()),
+              );
+            },
+            tooltip: 'Stock Inventory',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _fetchOrders,
