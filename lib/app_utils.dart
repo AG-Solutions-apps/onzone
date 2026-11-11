@@ -19,6 +19,33 @@ String formatWorkOrderRef(String? ref, {String fallback = 'N/A'}) {
   return trimmed;
 }
 
+/// Formats a receipt reference string like "REC/OZ/83/2026-27" or "REC/OZ/83/2026-27/1"
+/// to remove financial year/year suffix and append boxKey (e.g., "REC/OZ/83/1").
+String formatReceiptRef(String? rawRef, String boxKey) {
+  if (rawRef == null || rawRef.trim().isEmpty) return 'N/A';
+  final parts = rawRef.trim().split('/');
+  final filteredParts = <String>[];
+
+  final yearRegex = RegExp(r'^(\d{2,4}-\d{2,4}|(19|20)\d{2})$');
+
+  for (final part in parts) {
+    final trimmedPart = part.trim();
+    if (trimmedPart.isEmpty) continue;
+    // Skip financial year parts like "2026-27", "2024-2025", "2026"
+    if (yearRegex.hasMatch(trimmedPart)) continue;
+    filteredParts.add(trimmedPart);
+  }
+
+  // If the last part is already equal to boxKey (e.g. "1"), remove it to prevent duplicating boxKey
+  if (filteredParts.length > 1 && filteredParts.last == boxKey.trim()) {
+    filteredParts.removeLast();
+  }
+
+  final baseRef = filteredParts.join('/');
+  if (boxKey.trim().isEmpty) return baseRef;
+  return '$baseRef/${boxKey.trim()}';
+}
+
 /// Formats dates to "date day and year" style for UI display, e.g., "20 Jul 2026 (Mon)"
 String formatAppDate(dynamic rawDate, {String fallback = 'N/A'}) {
   if (rawDate == null) return fallback;

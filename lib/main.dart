@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
+import 'update_checker.dart';
 import 'splash_screen.dart';
 import 'portal_page.dart';
 import 'factory_login_page.dart';
@@ -36,6 +37,7 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.themeData,
       debugShowCheckedModeBanner: false,
       initialRoute: '/splash',
+      builder: (context, child) => UpgradeCheckOverlay(child: child!),
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const PortalPage(),

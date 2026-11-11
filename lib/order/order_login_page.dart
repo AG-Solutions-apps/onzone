@@ -5,6 +5,8 @@ import 'app_theme.dart';
 import 'order_home_page.dart';
 import 'api.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/gestures.dart';
+import '../in_app_webview_modal.dart';
 
 class OrderLoginPage extends StatefulWidget {
   const OrderLoginPage({super.key});
@@ -18,6 +20,7 @@ class _OrderLoginPageState extends State<OrderLoginPage> with SingleTickerProvid
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _acceptedTerms = false;
   String? _errorMessage;
   
   late AnimationController _animationController;
@@ -61,6 +64,13 @@ class _OrderLoginPageState extends State<OrderLoginPage> with SingleTickerProvid
     if (_usernameController.text.isEmpty || _passwordController.text.isEmpty) {
       setState(() {
         _errorMessage = 'Please fill in all fields';
+      });
+      return;
+    }
+
+    if (!_acceptedTerms) {
+      setState(() {
+        _errorMessage = 'Please accept the Privacy Policy and Terms & Conditions to proceed.';
       });
       return;
     }
@@ -178,6 +188,7 @@ Future<void> testInternet() async {
   @override
   Widget build(BuildContext context) {
     const primaryColor = AppTheme.primaryColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBackgroundColor,
@@ -402,6 +413,82 @@ Future<void> testInternet() async {
                             vertical: 16,
                           ),
                         ),
+                      ),
+                      
+                      const SizedBox(height: 20),
+
+                      // Terms and Conditions & Privacy Policy Checkbox
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Theme(
+                            data: Theme.of(context).copyWith(
+                              unselectedWidgetColor: isDark ? Colors.grey[500] : Colors.grey[600],
+                            ),
+                            child: Checkbox(
+                              value: _acceptedTerms,
+                              activeColor: primaryColor,
+                              checkColor: Colors.white,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              onChanged: (value) {
+                                setState(() {
+                                  _acceptedTerms = value ?? false;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.4,
+                                  color: isDark ? Colors.grey[300] : Colors.grey[700],
+                                ),
+                                children: [
+                                  const TextSpan(text: 'I accept the '),
+                                  TextSpan(
+                                    text: 'Terms & Conditions',
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontWeight: FontWeight.w600,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = () {
+                                        InAppWebViewModal.show(
+                                          context,
+                                          'https://houseofonzone.com/termsandconditions.html',
+                                          'Terms & Conditions',
+                                          primaryColor: primaryColor,
+                                        );
+                                      },
+                                  ),
+                                  const TextSpan(text: ' and '),
+                                  TextSpan(
+                                    text: 'Privacy Policy',
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontWeight: FontWeight.w600,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = () {
+                                        InAppWebViewModal.show(
+                                          context,
+                                          'https://houseofonzone.com/privacypolicy.html',
+                                          'Privacy Policy',
+                                          primaryColor: primaryColor,
+                                        );
+                                      },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       
                       const SizedBox(height: 20),
