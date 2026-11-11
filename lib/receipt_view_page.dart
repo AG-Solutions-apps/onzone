@@ -29,6 +29,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
   Map<String, dynamic>? mainDetails;
   List<dynamic> subList = [];
   Map<String, List<Map<String, dynamic>>> boxGroups = {};
+  Set<String> selectedBoxKeys = {};
 
   List<String> get sortedBoxKeys {
     final keys = boxGroups.keys.toList();
@@ -205,6 +206,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
             mainDetails = details;
             subList = subs;
             boxGroups = groups;
+            selectedBoxKeys.clear();
             isLoading = false;
           });
         } else {
@@ -236,61 +238,59 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
     final details = mainDetails!;
     final factory = details['work_order_rc_factory']?.toString() ?? 'N/A';
     final brand = details['work_order_rc_brand']?.toString() ?? 'N/A';
-    final boxCount = details['work_order_rc_box']?.toString() ?? '0';
     final workOrderNo = details['work_order_rc_id']?.toString() ?? details['work_order_rc_ref']?.toString() ?? 'N/A';
     final date = formatAppDate(details['work_order_rc_date']);
-    final dcNo = details['work_order_rc_dc_no']?.toString() ?? 'N/A';
-    final totalPcs = details['work_order_rc_pcs']?.toString() ?? '0';
-    final remarks = details['work_order_rc_remarks']?.toString() ?? 'N/A';
     final ref = details['work_order_rc_ref']?.toString() ?? 'N/A';
+
+    final boxesToPrint = selectedBoxKeys.isEmpty
+        ? sortedBoxKeys
+        : sortedBoxKeys.where((k) => selectedBoxKeys.contains(k)).toList();
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         build: (pw.Context context) {
-          return [
-            // Title
-            
-        
+          final List<pw.Widget> widgets = [];
 
-            // Box sections with repeated metadata headers
-            ...sortedBoxKeys.map((boxKey) {
-              final boxItems = boxGroups[boxKey] ?? [];
+          for (int i = 0; i < boxesToPrint.length; i++) {
+            if (i > 0) {
+              widgets.add(pw.NewPage());
+            }
+            final boxKey = boxesToPrint[i];
+            final boxItems = boxGroups[boxKey] ?? [];
 
-              // Group items
-              final Map<String, Map<String, dynamic>> grouped = {};
-              for (var item in boxItems) {
-                final barcode = item['work_order_rc_sub_barcode']?.toString() ?? '';
-                final size = item['finished_stock_size']?.toString() ?? 'N/A';
-                final amount = double.tryParse(item['finished_stock_amount']?.toString() ?? '') ?? 0.0;
+            // Group items
+            final Map<String, Map<String, dynamic>> grouped = {};
+            for (var item in boxItems) {
+              final barcode = item['work_order_rc_sub_barcode']?.toString() ?? '';
+              final size = item['finished_stock_size']?.toString() ?? 'N/A';
+              final amount = double.tryParse(item['finished_stock_amount']?.toString() ?? '') ?? 0.0;
 
-                final key = '$barcode|$size|$amount';
-                if (!grouped.containsKey(key)) {
-                  grouped[key] = {
-                    'barcode': barcode,
-                    'size': size,
-                    'amount': amount,
-                    'quantity': 1,
-                  };
-                } else {
-                  grouped[key]!['quantity'] = (grouped[key]!['quantity'] as int) + 1;
-                }
+              final key = '$barcode|$size|$amount';
+              if (!grouped.containsKey(key)) {
+                grouped[key] = {
+                  'barcode': barcode,
+                  'size': size,
+                  'amount': amount,
+                  'quantity': 1,
+                };
+              } else {
+                grouped[key]!['quantity'] = (grouped[key]!['quantity'] as int) + 1;
               }
-              final list = grouped.values.toList();
-              list.sort(_compareBoxItems);
+            }
+            final list = grouped.values.toList();
+            list.sort(_compareBoxItems);
 
-              // Compute box totals
-              int boxPcs = 0;
-              double boxAmount = 0.0;
-              for (var x in list) {
-                final q = x['quantity'] as int;
-                final a = x['amount'] as double;
-                boxPcs += q;
-                boxAmount += q * a;
-              }
+            // Compute box totals
+            int boxPcs = 0;
+            for (var x in list) {
+              final q = x['quantity'] as int;
+              boxPcs += q;
+            }
 
-              return pw.Column(
+            widgets.add(
+              pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   // Metadata header card layout in PDF
@@ -327,23 +327,6 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                                 ),
                               ),
                               pw.SizedBox(height: 4),
-                              // DC No / Boxes / Pcs
-                              // pw.Text(
-                              //   'DC No: $dcNo  |  Boxes: $boxCount  |  Pcs: $totalPcs',
-                              //   style: const pw.TextStyle(
-                              //     fontSize: 9,
-                              //   ),
-                              // ),
-                              // if (remarks.isNotEmpty && remarks != 'N/A') ...[
-                              //   pw.SizedBox(height: 4),
-                              //   pw.Text(
-                              //     'Remarks: $remarks',
-                              //     style: pw.TextStyle(
-                              //       fontSize: 9,
-                              //       fontStyle: pw.FontStyle.italic,
-                              //     ),
-                              //   ),
-                              // ],
                             ],
                           ),
                         ),
@@ -353,7 +336,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                           crossAxisAlignment: pw.CrossAxisAlignment.end,
                           children: [
                             pw.Text(
-                              'Ref: $ref/$boxKey',
+                              'Ref: ${formatReceiptRef(ref, boxKey)}',
                               style: pw.TextStyle(
                                 fontSize: 11,
                                 fontWeight: pw.FontWeight.bold,
@@ -377,7 +360,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                             ),
                             pw.SizedBox(height: 2),
                             pw.Text(
-                              '$ref/$boxKey',
+                              formatReceiptRef(ref, boxKey),
                               style: const pw.TextStyle(
                                 fontSize: 6,
                               ),
@@ -405,7 +388,6 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                             children: [
                               pw.Text('Box $boxKey (Total Pcs: $boxPcs)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-                              // pw.Text('Total Amount: Rs ${boxAmount.toStringAsFixed(2)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
                             ],
                           ),
                         ),
@@ -448,11 +430,11 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                   ),
                   pw.SizedBox(height: 24),
                 ],
-              );
-            }),
-            // Signature section in PDF
-            pw.SizedBox(height: 24),
-          ];
+              ),
+            );
+          }
+
+          return widgets;
         },
       ),
     );
@@ -495,7 +477,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
         ),
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
-          'DC RECEIPT',
+          ' PACKING SLIPS',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 16,
@@ -699,32 +681,17 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
         children: [
           // Header Bar Actions Row
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              // All Received tag
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Text(
-                  'All Received',
-                  style: TextStyle(
-                    color: Colors.green.shade700,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
               // Download PDF Button
               ElevatedButton.icon(
                 onPressed: _generateAndDownloadPDF,
                 icon: const Icon(Icons.download, size: 16),
-                label: const Text(
-                  'Download PDF',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                label: Text(
+                  selectedBoxKeys.isEmpty
+                      ? 'Download PDF'
+                      : 'Download PDF (${selectedBoxKeys.length} Selected)',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryColor,
@@ -758,7 +725,7 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
                   remarks,
                   workOrderNo,
                   'RC/${widget.receivedId}/$boxKey',
-                  '$ref/$boxKey',
+                  formatReceiptRef(ref, boxKey),
                 ),
                 const SizedBox(height: 12),
                 _buildBoxSection(boxKey, boxItems, isDark),
@@ -837,23 +804,51 @@ class _ReceiptViewPageState extends State<ReceiptViewPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.check_box_outline_blank,
-                      size: 18,
-                      color: isDark ? Colors.grey[400] : const Color(0xFF475569),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      if (selectedBoxKeys.contains(boxNo)) {
+                        selectedBoxKeys.remove(boxNo);
+                      } else {
+                        selectedBoxKeys.add(boxNo);
+                      }
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 4.0),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: Checkbox(
+                            value: selectedBoxKeys.contains(boxNo),
+                            onChanged: (bool? checked) {
+                              setState(() {
+                                if (checked == true) {
+                                  selectedBoxKeys.add(boxNo);
+                                } else {
+                                  selectedBoxKeys.remove(boxNo);
+                                }
+                              });
+                            },
+                            activeColor: AppTheme.primaryColor,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Box $boxNo (Total Pcs: $boxPcs)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Box $boxNo (Total Pcs: $boxPcs)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
                 // Row(
                 //   children: [

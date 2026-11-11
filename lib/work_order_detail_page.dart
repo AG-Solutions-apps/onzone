@@ -1555,7 +1555,7 @@ class _WorkOrderDetailPageState extends State<WorkOrderDetailPage> {
                 onPressed: () => _navigateToReceiptView(id),
                 icon: Icon(Icons.receipt_long, size: 16, color: primaryColor),
                 label: Text(
-                  'VIEW RECEIPT',
+                  'VIEW PACKING SLIP ',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,

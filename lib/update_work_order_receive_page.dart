@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -65,11 +66,35 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
   // API endpoints
   final String barcodeCheckApi = '$baseUrl/fetch-work-order-finish-check';
 
-  // Scanner state
+  // Scanner and keyboard state
   bool isScannerOpen = false;
   int? scanningBoxIndex;
   int? scanningBarcodeIndex;
   int selectedBoxIndex = 0;
+  bool isKeyboardEnabled = false;
+
+  void _closeKeyboard() {
+    setState(() {
+      isKeyboardEnabled = false;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+  }
+
+  void _openKeyboard([FocusNode? node]) {
+    setState(() {
+      isKeyboardEnabled = true;
+    });
+    if (node != null && node.hasFocus) {
+      node.unfocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (node != null && node.canRequestFocus) {
+        node.requestFocus();
+      }
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    });
+  }
 
   @override
   void initState() {
@@ -580,6 +605,9 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (focusNode.canRequestFocus) {
               focusNode.requestFocus();
+              if (!isKeyboardEnabled) {
+                SystemChannels.textInput.invokeMethod('TextInput.hide');
+              }
             }
           });
         }
@@ -608,6 +636,9 @@ class _UpdateWorkOrderReceivePageState extends State<UpdateWorkOrderReceivePage>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (focusNode.canRequestFocus) {
           focusNode.requestFocus();
+          if (!isKeyboardEnabled) {
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+          }
         }
       });
     }
@@ -644,6 +675,7 @@ void _updateTotals() {
   }
   // Open scanner
    Future<void> _openScanner(int boxIndex, int barcodeIndex) async {
+    _closeKeyboard();
     setState(() {
       scanningBoxIndex = boxIndex;
       scanningBarcodeIndex = barcodeIndex;
@@ -677,7 +709,6 @@ void _updateTotals() {
               (boxes[boxIndex]['barcodes'][barcodeIndex]['controller'] as TextEditingController).text = firstCode;
             }
             _updateBoxPieces(boxIndex);
-            _ensureEmptyBarcodeRow(boxIndex);
           });
           startScanIdx = 1;
         }
@@ -695,9 +726,9 @@ void _updateTotals() {
               (boxes[boxIndex]['barcodes'][index]['controller'] as TextEditingController).text = code;
             }
             _updateBoxPieces(boxIndex);
-            _ensureEmptyBarcodeRow(boxIndex);
           });
         }
+        _ensureEmptyBarcodeRow(boxIndex);
       }
     } catch (e) {
       // ignore
@@ -943,9 +974,37 @@ void _updateTotals() {
                 ],
               ),
               child: SafeArea(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (currentStep == 1 && (isKeyboardEnabled || MediaQuery.of(context).viewInsets.bottom > 0))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: _closeKeyboard,
+                              icon: const Icon(Icons.keyboard_hide, size: 18),
+                              label: const Text(
+                                'Close Keyboard',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey[800],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
                     if (currentStep == 1)
                       OutlinedButton(
                         onPressed: totalPieces == 0
@@ -994,8 +1053,10 @@ void _updateTotals() {
                     ),
                   ],
                 ),
-              ),
+              ],
             ),
+          ),
+        ),
     );
   }
 
@@ -1858,17 +1919,17 @@ void _updateTotals() {
                       final int originalIndex = barcode['originalIndex'];
                       return _buildBarcodeEntry(boxIndex, originalIndex, barcode);
                     }),
-                    // 2. New validated barcodes rendered as 3 per row grid (8 on desktop)
+                    // 2. New validated barcodes rendered as 2 per row grid (8 on desktop)
                     if (newValidatedBarcodes.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 3,
+                          crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 2,
                           crossAxisSpacing: 8,
                           mainAxisSpacing: 8,
-                          childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 2.8,
+                          childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 3.4,
                         ),
                         itemCount: newValidatedBarcodes.length,
                         itemBuilder: (context, index) {
@@ -1912,10 +1973,10 @@ void _updateTotals() {
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 3,
+                            crossAxisCount: MediaQuery.of(context).size.width >= 900 ? 8 : 2,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
-                            childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 2.8,
+                            childAspectRatio: MediaQuery.of(context).size.width >= 900 ? 3.0 : 3.4,
                           ),
                           itemCount: dbBarcodes.length,
                           itemBuilder: (context, index) {
@@ -2028,27 +2089,44 @@ void _updateTotals() {
                 ),
                 Row(
                   children: [
-                   Expanded(
-  child: TextFormField(
-    controller: barcode['controller'] as TextEditingController,
-    focusNode: barcode['focusNode'] as FocusNode?,
-    autofocus: barcode['code'].toString().isEmpty,
-    style: const TextStyle(
-      color: Colors.black, // Text color
-      fontSize: 16,
-    ),
-    decoration: InputDecoration(
-      hintText: 'Enter barcode',
-      hintStyle: TextStyle(
-        color: primaryColor, // Hint text color
+                 Expanded(
+  child: Listener(
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: (_) {
+      if (!isKeyboardEnabled) {
+        setState(() {
+          isKeyboardEnabled = true;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        });
+      }
+    },
+    child: TextFormField(
+      controller: barcode['controller'] as TextEditingController,
+      focusNode: barcode['focusNode'] as FocusNode?,
+      autofocus: false,
+      keyboardType: isKeyboardEnabled ? TextInputType.text : TextInputType.none,
+      onTap: () {
+        _openKeyboard(barcode['focusNode'] as FocusNode?);
+      },
+      style: const TextStyle(
+        color: Colors.black,
+        fontSize: 16,
       ),
-      border: InputBorder.none,
-      isDense: true,
+      decoration: InputDecoration(
+        hintText: 'Enter barcode',
+        hintStyle: TextStyle(
+          color: primaryColor,
+        ),
+        border: InputBorder.none,
+        isDense: true,
+      ),
+      onChanged: (value) =>
+          _handleManualBarcodeEntry(boxIndex, barcodeIndex, value),
+      onFieldSubmitted: (value) =>
+          _validateBarcode(boxIndex, barcodeIndex, value),
     ),
-    onChanged: (value) =>
-        _handleManualBarcodeEntry(boxIndex, barcodeIndex, value),
-    onFieldSubmitted: (value) =>
-        _validateBarcode(boxIndex, barcodeIndex, value),
   ),
 ),
                     
@@ -2057,19 +2135,29 @@ void _updateTotals() {
               ],
             ),
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-             
-            ),
-          ),
-
           IconButton(
-                      icon: Icon(Icons.qr_code_scanner, size: 20, color: primaryColor),
-                      onPressed: () => _openScanner(boxIndex, barcodeIndex),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
+            icon: Icon(
+              isKeyboardEnabled ? Icons.keyboard_hide : Icons.keyboard,
+              size: 20,
+              color: isKeyboardEnabled ? primaryColor : Colors.grey,
+            ),
+            tooltip: isKeyboardEnabled ? 'Close keyboard (keep fixed for scanning)' : 'Open keyboard',
+            onPressed: () {
+              if (isKeyboardEnabled) {
+                _closeKeyboard();
+              } else {
+                _openKeyboard(barcode['focusNode'] as FocusNode?);
+              }
+            },
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          IconButton(
+            icon: Icon(Icons.qr_code_scanner, size: 20, color: primaryColor),
+            onPressed: () => _openScanner(boxIndex, barcodeIndex),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
           IconButton(
             icon: Icon(
               Icons.check,
@@ -2123,7 +2211,7 @@ void _updateTotals() {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: borderColor),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       alignment: Alignment.center,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -2131,15 +2219,15 @@ void _updateTotals() {
         children: [
           if (isError)
             const Padding(
-              padding: EdgeInsets.only(right: 3),
-              child: Icon(Icons.error_outline, size: 12, color: Color(0xFFC62828)),
+              padding: EdgeInsets.only(right: 4),
+              child: Icon(Icons.error_outline, size: 14, color: Color(0xFFC62828)),
             ),
           Flexible(
             child: Text(
               code,
               style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w500,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
                 color: textColor,
               ),
               overflow: TextOverflow.ellipsis,
@@ -2150,8 +2238,8 @@ void _updateTotals() {
             Text(
               '*$occurrenceCount',
               style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w500,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
                 color: isError ? const Color(0xFFC62828) : const Color(0xFFE65100),
               ),
             ),
@@ -2162,7 +2250,7 @@ void _updateTotals() {
               onTap: () => _removeBarcode(boxIndex, originalIndex),
               child: Icon(
                 Icons.cancel,
-                size: 22,
+                size: 20,
                 color: isError ? const Color(0xFFC62828) : Colors.red,
               ),
             ),
